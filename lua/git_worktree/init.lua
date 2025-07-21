@@ -46,6 +46,29 @@ local function get_worktree_path(branch)
   return git_root .. "_" .. safe_branch, nil
 end
 
+local function find_worktree_location(branch)
+  -- Get the list of worktrees and find where this branch is located
+  local result, err = execute_command("git worktree list")
+  if err then
+    return nil, err
+  end
+  
+  -- Parse the worktree list to find the branch location
+  for line in result:gmatch("[^\r\n]+") do
+    -- Format: /path/to/worktree  commit_hash [branch_name]
+    local path, commit, branch_info = line:match("^(.-)%s+(%x+)%s+(.*)$")
+    if path and branch_info then
+      -- Extract branch name from [branch_name] format
+      local worktree_branch = branch_info:match("%[(.-)%]")
+      if worktree_branch == branch then
+        return path, nil
+      end
+    end
+  end
+  
+  return nil, "Worktree for branch '" .. branch .. "' not found"
+end
+
 function M.create_worktree(branch)
   local valid, err = validate_branch_name(branch)
   if not valid then
@@ -72,19 +95,30 @@ function M.switch_worktree(branch)
     return false, err
   end
   
-  local worktree_path, err = get_worktree_path(branch)
-  if err then
-    return false, err
-  end
+  -- First, try to find the branch in the existing worktree list
+  local worktree_path, find_err = find_worktree_location(branch)
   
-  local stat = vim.loop.fs_stat(worktree_path)
-  if not stat then
-    return false, "Worktree for branch '" .. branch .. "' does not exist"
+  if worktree_path then
+    -- Found the branch in worktree list, switch to it
+    vim.cmd("cd " .. worktree_path)
+    print("Switched to worktree: " .. worktree_path .. " [" .. branch .. "]")
+    return true, nil
+  else
+    -- Branch not found in worktree list, try the expected worktree path
+    local expected_path, path_err = get_worktree_path(branch)
+    if path_err then
+      return false, path_err
+    end
+    
+    local stat = vim.loop.fs_stat(expected_path)
+    if stat then
+      vim.cmd("cd " .. expected_path)
+      print("Switched to worktree: " .. expected_path)
+      return true, nil
+    else
+      return false, "Worktree for branch '" .. branch .. "' does not exist. Use :GitWorktreeCreate " .. branch .. " to create it first."
+    end
   end
-  
-  vim.cmd("cd " .. worktree_path)
-  print("Switched to worktree: " .. worktree_path)
-  return true, nil
 end
 
 function M.delete_worktree(branch)
