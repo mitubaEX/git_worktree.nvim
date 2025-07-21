@@ -76,6 +76,34 @@ local function find_worktree_location(branch)
   return nil, "Worktree for branch '" .. branch .. "' not found"
 end
 
+local function branch_exists(branch)
+  -- Check local branches first
+  local result, err = execute_command("git show-ref --verify --quiet refs/heads/" .. branch)
+  if not err then
+    return true, "local"
+  end
+  
+  -- Check remote branches (try common remotes)
+  local remotes = {"origin", "upstream"}
+  for _, remote in ipairs(remotes) do
+    result, err = execute_command("git show-ref --verify --quiet refs/remotes/" .. remote .. "/" .. branch)
+    if not err then
+      return true, "remote", remote
+    end
+  end
+  
+  return false, nil, nil
+end
+
+local function create_branch_from_current(branch)
+  -- Create a new branch from current HEAD
+  local result, err = execute_command("git branch " .. branch)
+  if err then
+    return false, "Failed to create branch: " .. err
+  end
+  return true, nil
+end
+
 local function update_buffers(new_path)
   -- Skip if both cleanup and update are disabled
   if not M.config.cleanup_buffers and not M.config.update_buffers then
@@ -200,7 +228,29 @@ function M.create_worktree(branch)
     return false, err
   end
   
-  local result, cmd_err = execute_command("git worktree add " .. worktree_path .. " " .. branch)
+  -- Check if branch exists
+  local exists, branch_type, remote_name = branch_exists(branch)
+  local worktree_cmd
+  
+  if exists then
+    if branch_type == "local" then
+      -- Branch exists locally, create worktree from it
+      worktree_cmd = "git worktree add " .. worktree_path .. " " .. branch
+      print("Creating worktree from existing local branch '" .. branch .. "'...")
+    elseif branch_type == "remote" then
+      -- Branch exists on remote, create worktree and track remote branch
+      local remote = remote_name or "origin"
+      worktree_cmd = "git worktree add " .. worktree_path .. " -b " .. branch .. " " .. remote .. "/" .. branch
+      print("Creating worktree from remote branch '" .. remote .. "/" .. branch .. "'...")
+    end
+  else
+    -- Branch doesn't exist, create new branch and worktree from current HEAD
+    worktree_cmd = "git worktree add " .. worktree_path .. " -b " .. branch
+    print("Creating new branch '" .. branch .. "' and worktree from current HEAD...")
+  end
+  
+  -- Execute the worktree creation command
+  local result, cmd_err = execute_command(worktree_cmd)
   if cmd_err then
     return false, "Failed to create worktree: " .. cmd_err
   end

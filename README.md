@@ -34,7 +34,7 @@ use {
 ### CLI Commands
 | Command | Description |
 |---------|-------------|
-| `:GitWorktreeCreate <branch>` | Create worktree for branch |
+| `:GitWorktreeCreate <branch>` | Create worktree (and branch if needed) |
 | `:GitWorktreeSwitch <branch>` | Switch to branch worktree |
 | `:GitWorktreeDelete <branch>` | Delete branch worktree |
 | `:GitWorktreeList` | List all worktrees |
@@ -102,6 +102,20 @@ require('git_worktree').setup({
 - **Smart handling**: Preserves unsaved changes and shows warnings
 
 **Example:** If you have `A/init.lua` open and switch worktrees, the buffer automatically updates to point to the same file in the new worktree location.
+
+## Smart Branch Handling
+
+The plugin automatically handles different branch scenarios:
+
+- **Existing local branch**: Creates worktree from the local branch
+- **Existing remote branch**: Creates local branch tracking the remote and creates worktree
+- **New branch**: Creates both the branch and worktree from current HEAD
+
+```vim
+:GitWorktreeCreate feature/new-ui    " Creates branch + worktree if branch doesn't exist
+:GitWorktreeCreate existing-branch   " Uses existing branch for worktree
+:GitWorktreeCreate origin-branch     " Creates local branch tracking remote + worktree
+```
 
 ## Requirements
 
