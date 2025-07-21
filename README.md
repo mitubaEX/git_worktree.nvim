@@ -10,7 +10,10 @@ A Neovim plugin for managing Git worktrees with Telescope integration.
   'yourusername/git_worktree.nvim',
   dependencies = { 'nvim-telescope/telescope.nvim' },
   config = function()
-    require('git_worktree').setup()
+    require('git_worktree').setup({
+      cleanup_buffers = true,  -- Clean up old buffers when switching
+      warn_unsaved = true,     -- Warn about unsaved changes
+    })
     require('telescope').load_extension('git_worktree')
   end
 }
@@ -81,6 +84,17 @@ project/
 ```
 
 Branch names with slashes become underscores in directory names.
+
+## Configuration
+
+```lua
+require('git_worktree').setup({
+  cleanup_buffers = true,  -- Automatically close buffers from old worktree
+  warn_unsaved = true,     -- Warn about unsaved changes in buffers
+})
+```
+
+When switching worktrees, the plugin automatically cleans up buffers from the previous directory to avoid confusion. Buffers with unsaved changes are kept open with a warning message.
 
 ## Requirements
 

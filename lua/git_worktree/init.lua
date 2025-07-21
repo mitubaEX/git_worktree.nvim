@@ -1,5 +1,11 @@
 local M = {}
 
+-- Default configuration
+M.config = {
+  cleanup_buffers = true,  -- Clean up buffers when switching worktrees
+  warn_unsaved = true,     -- Warn about unsaved changes
+}
+
 local function execute_command(cmd)
   -- Use vim.fn.system for better Neovim integration
   local result = vim.fn.system(cmd)
@@ -69,6 +75,63 @@ local function find_worktree_location(branch)
   return nil, "Worktree for branch '" .. branch .. "' not found"
 end
 
+local function cleanup_buffers(new_path)
+  -- Skip cleanup if disabled
+  if not M.config.cleanup_buffers then
+    return
+  end
+  
+  -- Get current working directory before switch
+  local old_cwd = vim.fn.getcwd()
+  
+  -- Get all buffers
+  local buffers = vim.api.nvim_list_bufs()
+  local closed_count = 0
+  local unsaved_count = 0
+  
+  for _, buf in ipairs(buffers) do
+    -- Check if buffer is valid and loaded
+    if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_is_loaded(buf) then
+      local buf_name = vim.api.nvim_buf_get_name(buf)
+      
+      -- If buffer has a name and is from the old directory
+      if buf_name and buf_name ~= "" then
+        -- Check if buffer path starts with old working directory
+        if buf_name:find("^" .. vim.pesc(old_cwd)) then
+          -- Check if buffer has unsaved changes
+          local buf_modified = vim.api.nvim_buf_get_option(buf, 'modified')
+          
+          if buf_modified then
+            unsaved_count = unsaved_count + 1
+            if M.config.warn_unsaved then
+              print("Warning: Buffer " .. vim.fn.fnamemodify(buf_name, ':t') .. " has unsaved changes")
+            end
+          else
+            -- Close buffer if no unsaved changes
+            local success = pcall(vim.api.nvim_buf_delete, buf, { force = false })
+            if success then
+              closed_count = closed_count + 1
+            end
+          end
+        end
+      end
+    end
+  end
+  
+  -- Show cleanup summary
+  if closed_count > 0 or unsaved_count > 0 then
+    local msg = "Buffer cleanup: "
+    if closed_count > 0 then
+      msg = msg .. closed_count .. " closed"
+    end
+    if unsaved_count > 0 then
+      if closed_count > 0 then msg = msg .. ", " end
+      msg = msg .. unsaved_count .. " unsaved (kept)"
+    end
+    print(msg)
+  end
+end
+
 function M.create_worktree(branch)
   local valid, err = validate_branch_name(branch)
   if not valid then
@@ -99,6 +162,9 @@ function M.switch_worktree(branch)
   local worktree_path, find_err = find_worktree_location(branch)
   
   if worktree_path then
+    -- Clean up buffers from old worktree before switching
+    cleanup_buffers(worktree_path)
+    
     -- Found the branch in worktree list, switch to it
     vim.cmd("cd " .. worktree_path)
     print("Switched to worktree: " .. worktree_path .. " [" .. branch .. "]")
@@ -112,6 +178,9 @@ function M.switch_worktree(branch)
     
     local stat = vim.loop.fs_stat(expected_path)
     if stat then
+      -- Clean up buffers from old worktree before switching
+      cleanup_buffers(expected_path)
+      
       vim.cmd("cd " .. expected_path)
       print("Switched to worktree: " .. expected_path)
       return true, nil
@@ -168,6 +237,9 @@ end
 
 function M.setup(opts)
   opts = opts or {}
+  
+  -- Merge user config with defaults
+  M.config = vim.tbl_deep_extend("force", M.config, opts)
   
   if vim.fn.executable("git") ~= 1 then
     vim.api.nvim_err_writeln("git_worktree.nvim requires git to be installed")
