@@ -1,27 +1,25 @@
 local M = {}
 
 local function execute_command(cmd)
-  local handle = io.popen(cmd)
-  if not handle then
-    return nil, "Failed to execute command"
+  -- Use vim.fn.system for better Neovim integration
+  local result = vim.fn.system(cmd)
+  local exit_code = vim.v.shell_error
+  
+  if exit_code ~= 0 then
+    return nil, "Command failed: " .. cmd .. " (exit code: " .. exit_code .. ")"
   end
   
-  local result = handle:read("*a")
-  local success, _, exit_code = handle:close()
-  
-  if not success or exit_code ~= 0 then
-    return nil, "Command failed: " .. cmd
-  end
-  
+  -- Remove trailing whitespace
   return result:gsub("%s+$", ""), nil
 end
 
 local function get_git_root()
+  -- Use Neovim's built-in function to get current working directory
+  local cwd = vim.fn.getcwd()
+  
   local result, err = execute_command("git rev-parse --show-toplevel")
   if err then
-    -- Debug: show what directory we're checking
-    local pwd = execute_command("pwd")
-    return nil, "Not in a git repository (current dir: " .. (pwd or "unknown") .. ")"
+    return nil, "Not in a git repository (current dir: " .. cwd .. ")"
   end
   return result, nil
 end
@@ -61,7 +59,7 @@ function M.create_worktree(branch)
   
   local result, cmd_err = execute_command("git worktree add " .. worktree_path .. " " .. branch)
   if cmd_err then
-    return false, "Failed to create worktree: " .. (result or "Unknown error")
+    return false, "Failed to create worktree: " .. cmd_err
   end
   
   print("Created worktree for branch '" .. branch .. "' at: " .. worktree_path)
@@ -102,7 +100,7 @@ function M.delete_worktree(branch)
   
   local result, cmd_err = execute_command("git worktree remove " .. worktree_path)
   if cmd_err then
-    return false, "Failed to delete worktree: " .. (result or "Unknown error")
+    return false, "Failed to delete worktree: " .. cmd_err
   end
   
   print("Deleted worktree for branch: " .. branch)
@@ -126,13 +124,11 @@ function M.current_worktree()
     return false, branch_err
   end
   
-  local pwd_result, pwd_err = execute_command("pwd")
-  if pwd_err then
-    return false, pwd_err
-  end
+  -- Use Neovim's built-in function instead of pwd command
+  local current_dir = vim.fn.getcwd()
   
   print("Current branch: " .. branch_result)
-  print("Current worktree: " .. pwd_result)
+  print("Current worktree: " .. current_dir)
   return true, nil
 end
 
