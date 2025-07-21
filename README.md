@@ -13,6 +13,7 @@ A Neovim plugin for managing Git worktrees with Telescope integration.
     require('git_worktree').setup({
       cleanup_buffers = true,  -- Clean up old buffers when switching
       warn_unsaved = true,     -- Warn about unsaved changes
+      update_buffers = true,   -- Update buffer paths to new worktree
     })
     require('telescope').load_extension('git_worktree')
   end
@@ -89,12 +90,18 @@ Branch names with slashes become underscores in directory names.
 
 ```lua
 require('git_worktree').setup({
-  cleanup_buffers = true,  -- Automatically close buffers from old worktree
+  cleanup_buffers = true,  -- Clean up old buffers when switching
   warn_unsaved = true,     -- Warn about unsaved changes in buffers
+  update_buffers = true,   -- Update buffer paths to match new worktree
 })
 ```
 
-When switching worktrees, the plugin automatically cleans up buffers from the previous directory to avoid confusion. Buffers with unsaved changes are kept open with a warning message.
+**Buffer Management:**
+- **`update_buffers = true`**: Automatically updates open buffers to point to the same files in the new worktree
+- **`cleanup_buffers = true`**: Closes buffers that don't exist in the new worktree
+- **Smart handling**: Preserves unsaved changes and shows warnings
+
+**Example:** If you have `A/init.lua` open and switch worktrees, the buffer automatically updates to point to the same file in the new worktree location.
 
 ## Requirements
 

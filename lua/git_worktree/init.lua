@@ -4,6 +4,7 @@ local M = {}
 M.config = {
   cleanup_buffers = true,  -- Clean up buffers when switching worktrees
   warn_unsaved = true,     -- Warn about unsaved changes
+  update_buffers = true,   -- Update buffer paths to match new worktree
 }
 
 local function execute_command(cmd)
@@ -75,9 +76,9 @@ local function find_worktree_location(branch)
   return nil, "Worktree for branch '" .. branch .. "' not found"
 end
 
-local function cleanup_buffers(new_path)
-  -- Skip cleanup if disabled
-  if not M.config.cleanup_buffers then
+local function update_buffers(new_path)
+  -- Skip if both cleanup and update are disabled
+  if not M.config.cleanup_buffers and not M.config.update_buffers then
     return
   end
   
@@ -88,6 +89,8 @@ local function cleanup_buffers(new_path)
   local buffers = vim.api.nvim_list_bufs()
   local closed_count = 0
   local unsaved_count = 0
+  local updated_count = 0
+  local failed_update_count = 0
   
   for _, buf in ipairs(buffers) do
     -- Check if buffer is valid and loaded
@@ -101,16 +104,62 @@ local function cleanup_buffers(new_path)
           -- Check if buffer has unsaved changes
           local buf_modified = vim.api.nvim_buf_get_option(buf, 'modified')
           
-          if buf_modified then
-            unsaved_count = unsaved_count + 1
-            if M.config.warn_unsaved then
-              print("Warning: Buffer " .. vim.fn.fnamemodify(buf_name, ':t') .. " has unsaved changes")
+          if M.config.update_buffers then
+            -- Calculate relative path from old worktree
+            local relative_path = buf_name:sub(#old_cwd + 2) -- +2 to skip the trailing slash
+            local new_file_path = new_path .. "/" .. relative_path
+            
+            -- Check if file exists in new worktree
+            local stat = vim.loop.fs_stat(new_file_path)
+            if stat then
+              -- Update buffer to point to new file
+              local success = pcall(function()
+                vim.api.nvim_buf_set_name(buf, new_file_path)
+                -- Reload buffer content from new location
+                vim.api.nvim_buf_call(buf, function()
+                  vim.cmd("edit!")
+                end)
+              end)
+              
+              if success then
+                updated_count = updated_count + 1
+              else
+                failed_update_count = failed_update_count + 1
+                if M.config.warn_unsaved then
+                  print("Warning: Failed to update buffer " .. vim.fn.fnamemodify(buf_name, ':t'))
+                end
+              end
+            else
+              -- File doesn't exist in new worktree
+              if buf_modified then
+                unsaved_count = unsaved_count + 1
+                if M.config.warn_unsaved then
+                  print("Warning: Buffer " .. vim.fn.fnamemodify(buf_name, ':t') .. " has unsaved changes and doesn't exist in new worktree")
+                end
+              else
+                -- Clean up buffer if file doesn't exist in new worktree and no unsaved changes
+                if M.config.cleanup_buffers then
+                  local success = pcall(vim.api.nvim_buf_delete, buf, { force = false })
+                  if success then
+                    closed_count = closed_count + 1
+                  end
+                end
+              end
             end
           else
-            -- Close buffer if no unsaved changes
-            local success = pcall(vim.api.nvim_buf_delete, buf, { force = false })
-            if success then
-              closed_count = closed_count + 1
+            -- Just cleanup without updating
+            if buf_modified then
+              unsaved_count = unsaved_count + 1
+              if M.config.warn_unsaved then
+                print("Warning: Buffer " .. vim.fn.fnamemodify(buf_name, ':t') .. " has unsaved changes")
+              end
+            else
+              if M.config.cleanup_buffers then
+                local success = pcall(vim.api.nvim_buf_delete, buf, { force = false })
+                if success then
+                  closed_count = closed_count + 1
+                end
+              end
             end
           end
         end
@@ -118,17 +167,25 @@ local function cleanup_buffers(new_path)
     end
   end
   
-  -- Show cleanup summary
-  if closed_count > 0 or unsaved_count > 0 then
-    local msg = "Buffer cleanup: "
+  -- Show summary
+  if updated_count > 0 or closed_count > 0 or unsaved_count > 0 or failed_update_count > 0 then
+    local msg = "Buffer update: "
+    local parts = {}
+    
+    if updated_count > 0 then
+      table.insert(parts, updated_count .. " updated")
+    end
     if closed_count > 0 then
-      msg = msg .. closed_count .. " closed"
+      table.insert(parts, closed_count .. " closed")
     end
     if unsaved_count > 0 then
-      if closed_count > 0 then msg = msg .. ", " end
-      msg = msg .. unsaved_count .. " unsaved (kept)"
+      table.insert(parts, unsaved_count .. " unsaved (kept)")
     end
-    print(msg)
+    if failed_update_count > 0 then
+      table.insert(parts, failed_update_count .. " failed")
+    end
+    
+    print(msg .. table.concat(parts, ", "))
   end
 end
 
@@ -162,8 +219,8 @@ function M.switch_worktree(branch)
   local worktree_path, find_err = find_worktree_location(branch)
   
   if worktree_path then
-    -- Clean up buffers from old worktree before switching
-    cleanup_buffers(worktree_path)
+    -- Update/cleanup buffers from old worktree before switching
+    update_buffers(worktree_path)
     
     -- Found the branch in worktree list, switch to it
     vim.cmd("cd " .. worktree_path)
@@ -178,8 +235,8 @@ function M.switch_worktree(branch)
     
     local stat = vim.loop.fs_stat(expected_path)
     if stat then
-      -- Clean up buffers from old worktree before switching
-      cleanup_buffers(expected_path)
+      -- Update/cleanup buffers from old worktree before switching
+      update_buffers(expected_path)
       
       vim.cmd("cd " .. expected_path)
       print("Switched to worktree: " .. expected_path)
