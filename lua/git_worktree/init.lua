@@ -19,7 +19,9 @@ end
 local function get_git_root()
   local result, err = execute_command("git rev-parse --show-toplevel")
   if err then
-    return nil, "Not in a git repository"
+    -- Debug: show what directory we're checking
+    local pwd = execute_command("pwd")
+    return nil, "Not in a git repository (current dir: " .. (pwd or "unknown") .. ")"
   end
   return result, nil
 end
