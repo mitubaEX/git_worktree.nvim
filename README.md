@@ -1,6 +1,6 @@
 # git_worktree.nvim
 
-A Neovim plugin for managing Git worktrees.
+A Neovim plugin for managing Git worktrees with Telescope integration.
 
 ## Installation
 
@@ -8,17 +8,26 @@ A Neovim plugin for managing Git worktrees.
 -- Lazy.nvim
 {
   'yourusername/git_worktree.nvim',
+  dependencies = { 'nvim-telescope/telescope.nvim' },
   config = function()
     require('git_worktree').setup()
+    require('telescope').load_extension('git_worktree')
   end
 }
 
 -- Packer
-use 'yourusername/git_worktree.nvim'
+use {
+  'yourusername/git_worktree.nvim',
+  requires = { 'nvim-telescope/telescope.nvim' },
+  config = function()
+    require('telescope').load_extension('git_worktree')
+  end
+}
 ```
 
 ## Commands
 
+### CLI Commands
 | Command | Description |
 |---------|-------------|
 | `:GitWorktreeCreate <branch>` | Create worktree for branch |
@@ -27,13 +36,37 @@ use 'yourusername/git_worktree.nvim'
 | `:GitWorktreeList` | List all worktrees |
 | `:GitWorktreeCurrent` | Show current branch/worktree |
 
+### Telescope Commands
+| Command | Description |
+|---------|-------------|
+| `:Telescope git_worktree` | Interactive worktree picker |
+| `:Telescope git_worktree create` | Create worktree from branch list |
+
 ## Usage
 
+### CLI
 ```vim
 :GitWorktreeCreate feature/new-ui    " Create worktree
 :GitWorktreeSwitch feature/new-ui    " Switch to it
 :GitWorktreeSwitch main              " Switch back to main
 :GitWorktreeDelete feature/new-ui    " Clean up
+```
+
+### Telescope
+```vim
+:Telescope git_worktree              " Interactive picker
+" <Enter> - Switch to worktree
+" <C-d>   - Delete worktree (not current)
+" <C-n>   - Create new worktree
+
+:Telescope git_worktree create       " Create from branches
+```
+
+### Keybindings
+```lua
+-- Optional keybindings
+vim.keymap.set('n', '<leader>gw', '<cmd>Telescope git_worktree<cr>')
+vim.keymap.set('n', '<leader>gW', '<cmd>Telescope git_worktree create<cr>')
 ```
 
 ## How It Works
@@ -53,12 +86,14 @@ Branch names with slashes become underscores in directory names.
 
 - Neovim 0.7+
 - Git
+- telescope.nvim (for UI)
 
 ## Development
 
 Plugin structure:
 - `lua/git_worktree/init.lua` - Core functionality
 - `plugin/git_worktree.lua` - Command definitions
+- `lua/telescope/_extensions/git_worktree.lua` - Telescope integration
 
 ## License
 
