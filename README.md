@@ -14,6 +14,7 @@ A Neovim plugin for managing Git worktrees with Telescope integration.
       cleanup_buffers = true,  -- Clean up old buffers when switching
       warn_unsaved = true,     -- Warn about unsaved changes
       update_buffers = true,   -- Update buffer paths to new worktree
+      copy_envrc = true,       -- Copy .envrc file to new worktrees (direnv)
     })
     require('telescope').load_extension('git_worktree')
   end
@@ -93,6 +94,7 @@ require('git_worktree').setup({
   cleanup_buffers = true,  -- Clean up old buffers when switching
   warn_unsaved = true,     -- Warn about unsaved changes in buffers
   update_buffers = true,   -- Update buffer paths to match new worktree
+  copy_envrc = true,       -- Copy .envrc file to new worktrees (direnv)
 })
 ```
 
@@ -100,6 +102,11 @@ require('git_worktree').setup({
 - **`update_buffers = true`**: Automatically updates open buffers to point to the same files in the new worktree
 - **`cleanup_buffers = true`**: Closes buffers that don't exist in the new worktree
 - **Smart handling**: Preserves unsaved changes and shows warnings
+
+**Direnv Integration:**
+- **`copy_envrc = true`**: Automatically copies `.envrc` file from current worktree to new worktrees
+- **Smart copying**: Won't overwrite existing `.envrc` files in target worktree
+- **Seamless workflow**: Environment variables follow you to new worktrees
 
 **Example:** If you have `A/init.lua` open and switch worktrees, the buffer automatically updates to point to the same file in the new worktree location.
 
@@ -122,6 +129,7 @@ The plugin automatically handles different branch scenarios:
 - Neovim 0.7+
 - Git
 - telescope.nvim (for UI)
+- direnv (optional, for `.envrc` file support)
 
 ## Development
 

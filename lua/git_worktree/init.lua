@@ -5,6 +5,7 @@ M.config = {
   cleanup_buffers = true,  -- Clean up buffers when switching worktrees
   warn_unsaved = true,     -- Warn about unsaved changes
   update_buffers = true,   -- Update buffer paths to match new worktree
+  copy_envrc = true,       -- Copy .envrc file to new worktrees (for direnv)
 }
 
 local function execute_command(cmd)
@@ -101,6 +102,40 @@ local function create_branch_from_current(branch)
   if err then
     return false, "Failed to create branch: " .. err
   end
+  return true, nil
+end
+
+local function copy_envrc_file(source_dir, target_dir)
+  -- Skip if disabled
+  if not M.config.copy_envrc then
+    return true, nil
+  end
+  
+  local source_envrc = source_dir .. "/.envrc"
+  local target_envrc = target_dir .. "/.envrc"
+  
+  -- Check if source .envrc exists
+  local source_stat = vim.loop.fs_stat(source_envrc)
+  if not source_stat then
+    -- No .envrc file to copy, that's ok
+    return true, nil
+  end
+  
+  -- Check if target .envrc already exists
+  local target_stat = vim.loop.fs_stat(target_envrc)
+  if target_stat then
+    -- Target .envrc already exists, don't overwrite
+    print("Note: .envrc already exists in target worktree, skipping copy")
+    return true, nil
+  end
+  
+  -- Copy the .envrc file
+  local success, err_name, err_msg = vim.loop.fs_copyfile(source_envrc, target_envrc)
+  if not success then
+    return false, "Failed to copy .envrc: " .. (err_msg or err_name or "Unknown error")
+  end
+  
+  print("Copied .envrc to new worktree")
   return true, nil
 end
 
@@ -253,6 +288,14 @@ function M.create_worktree(branch)
   local result, cmd_err = execute_command(worktree_cmd)
   if cmd_err then
     return false, "Failed to create worktree: " .. cmd_err
+  end
+  
+  -- Copy .envrc file from current directory to new worktree
+  local current_dir = vim.fn.getcwd()
+  local copy_success, copy_err = copy_envrc_file(current_dir, worktree_path)
+  if not copy_success then
+    -- Don't fail the entire operation if .envrc copy fails, just warn
+    print("Warning: " .. copy_err)
   end
   
   print("Created worktree for branch '" .. branch .. "' at: " .. worktree_path)
