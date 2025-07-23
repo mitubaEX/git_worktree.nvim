@@ -139,6 +139,68 @@ local function copy_envrc_file(source_dir, target_dir)
   return true, nil
 end
 
+local function get_github_remote_info()
+  -- Get the remote URL for origin
+  local result, err = execute_command("git remote get-url origin")
+  if err then
+    return nil, nil, "No origin remote found"
+  end
+  
+  -- Parse GitHub URL to extract owner and repo
+  -- Handle both SSH and HTTPS formats
+  local owner, repo
+  
+  -- SSH format: git@github.com:owner/repo.git
+  owner, repo = result:match("git@github%.com:([^/]+)/([^%.]+)")
+  
+  if not owner then
+    -- HTTPS format: https://github.com/owner/repo.git
+    owner, repo = result:match("https://github%.com/([^/]+)/([^%.]+)")
+  end
+  
+  if not owner or not repo then
+    return nil, nil, "Could not parse GitHub repository from remote URL"
+  end
+  
+  return owner, repo, nil
+end
+
+local function fetch_pr_info(pr_number)
+  -- Get GitHub repository info
+  local owner, repo, err = get_github_remote_info()
+  if err then
+    return nil, err
+  end
+  
+  -- Use GitHub CLI to get PR information
+  local gh_cmd = string.format("gh pr view %s --repo %s/%s --json headRefName,headRepository", pr_number, owner, repo)
+  local result, cmd_err = execute_command(gh_cmd)
+  if cmd_err then
+    return nil, "Failed to fetch PR info. Make sure 'gh' CLI is installed and authenticated: " .. cmd_err
+  end
+  
+  -- Parse JSON response
+  local success, json_data = pcall(vim.fn.json_decode, result)
+  if not success then
+    return nil, "Failed to parse PR information"
+  end
+  
+  local branch_name = json_data.headRefName
+  local fork_owner = json_data.headRepository and json_data.headRepository.owner and json_data.headRepository.owner.login
+  
+  if not branch_name then
+    return nil, "Could not determine PR branch name"
+  end
+  
+  return {
+    branch = branch_name,
+    fork_owner = fork_owner,
+    is_fork = fork_owner and fork_owner ~= owner,
+    repo_owner = owner,
+    repo_name = repo
+  }, nil
+end
+
 local function update_buffers(new_path)
   -- Skip if both cleanup and update are disabled
   if not M.config.cleanup_buffers and not M.config.update_buffers then
@@ -382,6 +444,93 @@ function M.current_worktree()
   
   print("Current branch: " .. branch_result)
   print("Current worktree: " .. current_dir)
+  return true, nil
+end
+
+function M.review_pr(pr_number)
+  -- Validate PR number
+  if not pr_number or pr_number == "" then
+    return false, "PR number is required"
+  end
+  
+  -- Convert to number and validate
+  local pr_num = tonumber(pr_number)
+  if not pr_num or pr_num <= 0 then
+    return false, "Invalid PR number: " .. pr_number
+  end
+  
+  print("Fetching PR #" .. pr_num .. " information...")
+  
+  -- Get PR information
+  local pr_info, err = fetch_pr_info(pr_num)
+  if err then
+    return false, err
+  end
+  
+  print("Found PR branch: " .. pr_info.branch .. (pr_info.is_fork and " (from fork: " .. pr_info.fork_owner .. ")" or ""))
+  
+  -- Create a review branch name
+  local review_branch = "review/pr-" .. pr_num
+  local worktree_path, path_err = get_worktree_path(review_branch)
+  if path_err then
+    return false, path_err
+  end
+  
+  -- Fetch the PR branch
+  local fetch_cmd
+  if pr_info.is_fork then
+    -- For forks, we need to fetch from the fork's remote
+    print("Fetching from fork: " .. pr_info.fork_owner .. "/" .. pr_info.repo_name)
+    
+    -- Add fork as remote if it doesn't exist
+    local remote_name = pr_info.fork_owner
+    local add_remote_cmd = string.format("git remote add %s https://github.com/%s/%s.git", 
+                                       remote_name, pr_info.fork_owner, pr_info.repo_name)
+    execute_command(add_remote_cmd) -- Don't fail if remote already exists
+    
+    -- Fetch the fork's branch
+    fetch_cmd = string.format("git fetch %s %s", remote_name, pr_info.branch)
+  else
+    -- For same-repo PRs, fetch from origin
+    fetch_cmd = string.format("git fetch origin %s", pr_info.branch)
+  end
+  
+  print("Fetching PR branch...")
+  local fetch_result, fetch_err = execute_command(fetch_cmd)
+  if fetch_err then
+    return false, "Failed to fetch PR branch: " .. fetch_err
+  end
+  
+  -- Create worktree from the fetched branch
+  local worktree_cmd
+  if pr_info.is_fork then
+    worktree_cmd = string.format("git worktree add %s -b %s %s/%s", 
+                                worktree_path, review_branch, pr_info.fork_owner, pr_info.branch)
+  else
+    worktree_cmd = string.format("git worktree add %s -b %s origin/%s", 
+                                worktree_path, review_branch, pr_info.branch)
+  end
+  
+  print("Creating review worktree...")
+  local result, cmd_err = execute_command(worktree_cmd)
+  if cmd_err then
+    return false, "Failed to create review worktree: " .. cmd_err
+  end
+  
+  -- Copy .envrc file
+  local current_dir = vim.fn.getcwd()
+  local copy_success, copy_err = copy_envrc_file(current_dir, worktree_path)
+  if not copy_success then
+    print("Warning: " .. copy_err)
+  end
+  
+  -- Switch to the review worktree
+  update_buffers(worktree_path)
+  vim.cmd("cd " .. worktree_path)
+  
+  print("Created review worktree for PR #" .. pr_num .. " at: " .. worktree_path)
+  print("Branch: " .. review_branch .. " (tracking " .. pr_info.branch .. ")")
+  
   return true, nil
 end
 

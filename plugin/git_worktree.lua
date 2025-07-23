@@ -48,3 +48,12 @@ end, {
   nargs = 0,
   desc = "Show the current branch and its worktree"
 })
+
+vim.api.nvim_create_user_command('GitWorktreeReview', function(opts)
+  local pr_number = opts.args
+  local success, error_msg = git_worktree.review_pr(pr_number)
+  handle_command_result(success, error_msg)
+end, {
+  nargs = 1,
+  desc = "Create worktree for GitHub PR review"
+})

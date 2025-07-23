@@ -40,6 +40,7 @@ use {
 | `:GitWorktreeDelete <branch>` | Delete branch worktree |
 | `:GitWorktreeList` | List all worktrees |
 | `:GitWorktreeCurrent` | Show current branch/worktree |
+| `:GitWorktreeReview <pr_number>` | Create worktree for GitHub PR review |
 
 ### Telescope Commands
 | Command | Description |
@@ -55,6 +56,7 @@ use {
 :GitWorktreeSwitch feature/new-ui    " Switch to it
 :GitWorktreeSwitch main              " Switch back to main
 :GitWorktreeDelete feature/new-ui    " Clean up
+:GitWorktreeReview 123               " Review GitHub PR #123
 ```
 
 ### Telescope
@@ -124,12 +126,30 @@ The plugin automatically handles different branch scenarios:
 :GitWorktreeCreate origin-branch     " Creates local branch tracking remote + worktree
 ```
 
+## GitHub PR Review
+
+The `:GitWorktreeReview` command streamlines code review by automatically:
+
+1. **Fetching PR information** using GitHub CLI
+2. **Creating a dedicated review worktree** with branch name `review/pr-<number>`
+3. **Handling forks** by adding remote and fetching the PR branch
+4. **Switching to the review worktree** automatically
+
+```vim
+:GitWorktreeReview 123    " Reviews PR #123
+```
+
+**Requirements for PR review:**
+- GitHub CLI (`gh`) installed and authenticated
+- Repository must have GitHub origin remote
+
 ## Requirements
 
 - Neovim 0.7+
 - Git
 - telescope.nvim (for UI)
 - direnv (optional, for `.envrc` file support)
+- GitHub CLI (`gh`) (optional, for PR review feature)
 
 ## Development
 
