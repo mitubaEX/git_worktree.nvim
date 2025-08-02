@@ -41,6 +41,7 @@ use {
 | `:GitWorktreeList` | List all worktrees |
 | `:GitWorktreeCurrent` | Show current branch/worktree |
 | `:GitWorktreeReview <pr_number>` | Create worktree for GitHub PR review |
+| `:GitWorktreeCleanup` | Remove all worktrees except current |
 
 ### Telescope Commands
 | Command | Description |
@@ -57,6 +58,7 @@ use {
 :GitWorktreeSwitch main              " Switch back to main
 :GitWorktreeDelete feature/new-ui    " Clean up
 :GitWorktreeReview 123               " Review GitHub PR #123
+:GitWorktreeCleanup                  " Clean up all worktrees
 ```
 
 ### Telescope
@@ -142,6 +144,40 @@ The `:GitWorktreeReview` command streamlines code review by automatically:
 **Requirements for PR review:**
 - GitHub CLI (`gh`) installed and authenticated
 - Repository must have GitHub origin remote
+
+## Bulk Cleanup
+
+The `:GitWorktreeCleanup` command helps you clean up all worktrees at once:
+
+1. **Lists all worktrees** except the current one
+2. **Shows confirmation prompt** with details of what will be deleted
+3. **Safely removes worktrees** one by one
+4. **Reports results** including any failures
+
+```vim
+:GitWorktreeCleanup
+```
+
+**Example output:**
+```
+The following worktrees will be deleted:
+  - feature/ui-update (/repo_feature_ui-update)  
+  - review/pr-123 (/repo_review_pr-123)
+  - hotfix/bug (/repo_hotfix_bug)
+
+Delete 3 worktree(s)? (y/N): y
+
+Deleting worktrees...
+Deleted worktree: feature/ui-update
+Deleted worktree: review/pr-123  
+Failed to delete hotfix/bug: worktree contains modified or untracked files
+
+Cleanup completed:
+  - 2 worktrees deleted
+  - 1 worktrees failed to delete
+
+Tip: Use 'git worktree remove --force <path>' to force delete
+```
 
 ## Requirements
 

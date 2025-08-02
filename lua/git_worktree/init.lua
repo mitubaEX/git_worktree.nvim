@@ -534,6 +534,100 @@ function M.review_pr(pr_number)
   return true, nil
 end
 
+local function get_all_worktrees_except_current()
+  -- Get the list of all worktrees
+  local result, err = execute_command("git worktree list")
+  if err then
+    return nil, err
+  end
+  
+  local current_dir = vim.fn.getcwd()
+  local worktrees = {}
+  
+  for line in result:gmatch("[^\r\n]+") do
+    -- Format: /path/to/worktree  commit_hash [branch_name]
+    local path, commit, branch_info = line:match("^(.-)%s+(%x+)%s+(.*)$")
+    if path and branch_info then
+      local branch = branch_info:match("%[(.-)%]") or "HEAD"
+      
+      -- Skip the current worktree
+      if path ~= current_dir then
+        table.insert(worktrees, {
+          path = path,
+          branch = branch,
+          commit = commit
+        })
+      end
+    end
+  end
+  
+  return worktrees, nil
+end
+
+function M.cleanup_all_worktrees()
+  -- Get all worktrees except current
+  local worktrees, err = get_all_worktrees_except_current()
+  if err then
+    return false, err
+  end
+  
+  if #worktrees == 0 then
+    print("No worktrees to clean up")
+    return true, nil
+  end
+  
+  -- Show what will be deleted
+  print("The following worktrees will be deleted:")
+  for _, wt in ipairs(worktrees) do
+    print("  - " .. wt.branch .. " (" .. wt.path .. ")")
+  end
+  
+  -- Ask for confirmation
+  local confirm = vim.fn.input("Delete " .. #worktrees .. " worktree(s)? (y/N): ")
+  if confirm:lower() ~= "y" and confirm:lower() ~= "yes" then
+    print("\nOperation cancelled")
+    return true, nil
+  end
+  
+  print("\nDeleting worktrees...")
+  
+  local deleted_count = 0
+  local failed_count = 0
+  local failed_worktrees = {}
+  
+  for _, wt in ipairs(worktrees) do
+    local cmd = "git worktree remove " .. wt.path
+    local result, cmd_err = execute_command(cmd)
+    
+    if cmd_err then
+      failed_count = failed_count + 1
+      table.insert(failed_worktrees, {
+        branch = wt.branch,
+        path = wt.path,
+        error = cmd_err
+      })
+      print("Failed to delete " .. wt.branch .. ": " .. cmd_err)
+    else
+      deleted_count = deleted_count + 1
+      print("Deleted worktree: " .. wt.branch)
+    end
+  end
+  
+  -- Summary
+  print("\nCleanup completed:")
+  print("  - " .. deleted_count .. " worktrees deleted")
+  if failed_count > 0 then
+    print("  - " .. failed_count .. " worktrees failed to delete")
+    print("\nFailed worktrees (may have uncommitted changes):")
+    for _, failed in ipairs(failed_worktrees) do
+      print("  - " .. failed.branch .. " (" .. failed.path .. ")")
+    end
+    print("\nTip: Use 'git worktree remove --force <path>' to force delete")
+  end
+  
+  return true, nil
+end
+
 function M.setup(opts)
   opts = opts or {}
   

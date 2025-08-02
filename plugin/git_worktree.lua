@@ -57,3 +57,11 @@ end, {
   nargs = 1,
   desc = "Create worktree for GitHub PR review"
 })
+
+vim.api.nvim_create_user_command('GitWorktreeCleanup', function()
+  local success, error_msg = git_worktree.cleanup_all_worktrees()
+  handle_command_result(success, error_msg)
+end, {
+  nargs = 0,
+  desc = "Remove all worktrees except current (with confirmation)"
+})
