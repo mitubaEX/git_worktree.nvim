@@ -6,6 +6,7 @@ M.config = {
   warn_unsaved = true,     -- Warn about unsaved changes
   update_buffers = true,   -- Update buffer paths to match new worktree
   copy_envrc = true,       -- Copy .envrc file to new worktrees (for direnv)
+  worktree_dir = ".worktrees", -- Directory name for aggregating worktrees
 }
 
 local function execute_command(cmd)
@@ -44,14 +45,34 @@ local function validate_branch_name(branch)
   return true, nil
 end
 
+local function ensure_worktree_directory(git_root)
+  local worktree_dir = git_root .. "/" .. M.config.worktree_dir
+  local stat = vim.loop.fs_stat(worktree_dir)
+
+  if not stat then
+    -- Create the worktree aggregate directory
+    local success, err_name, err_msg = vim.loop.fs_mkdir(worktree_dir, 755)
+    if not success then
+      return nil, "Failed to create worktree directory: " .. (err_msg or err_name or "Unknown error")
+    end
+  end
+
+  return worktree_dir, nil
+end
+
 local function get_worktree_path(branch)
   local git_root, err = get_git_root()
   if err then
     return nil, err
   end
-  
+
+  local worktree_dir, dir_err = ensure_worktree_directory(git_root)
+  if dir_err then
+    return nil, dir_err
+  end
+
   local safe_branch = branch:gsub("/", "_")
-  return git_root .. "_" .. safe_branch, nil
+  return worktree_dir .. "/" .. safe_branch, nil
 end
 
 local function find_worktree_location(branch)
