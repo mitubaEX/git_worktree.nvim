@@ -15,6 +15,7 @@ A Neovim plugin for managing Git worktrees with Telescope integration.
       warn_unsaved = true,     -- Warn about unsaved changes
       update_buffers = true,   -- Update buffer paths to new worktree
       copy_envrc = true,       -- Copy .envrc file to new worktrees (direnv)
+      worktree_dir = ".worktrees", -- Directory for aggregating worktrees
     })
     require('telescope').load_extension('git_worktree')
   end
@@ -80,16 +81,20 @@ vim.keymap.set('n', '<leader>gW', '<cmd>Telescope git_worktree create<cr>')
 
 ## How It Works
 
-Creates worktrees in adjacent directories:
+Organizes all worktrees in a centralized directory within your repository:
 
 ```
-project/
-├── my-repo/              # Main repository
-├── my-repo_feature_ui/   # Feature branch worktree
-└── my-repo_hotfix/       # Hotfix branch worktree
+my-repo/
+├── .git/                 # Main git directory
+├── .worktrees/           # Aggregated worktree directory
+│   ├── feature_ui/       # Feature branch worktree
+│   ├── hotfix/           # Hotfix branch worktree
+│   └── review_pr-123/    # PR review worktree
+├── src/                  # Your source code
+└── README.md             # Your files
 ```
 
-Branch names with slashes become underscores in directory names.
+Branch names with slashes become underscores in directory names. All worktrees are organized in the `.worktrees` directory, keeping your filesystem clean and organized.
 
 ## Configuration
 
@@ -99,6 +104,7 @@ require('git_worktree').setup({
   warn_unsaved = true,     -- Warn about unsaved changes in buffers
   update_buffers = true,   -- Update buffer paths to match new worktree
   copy_envrc = true,       -- Copy .envrc file to new worktrees (direnv)
+  worktree_dir = ".worktrees", -- Directory name for aggregating worktrees
 })
 ```
 
@@ -111,6 +117,11 @@ require('git_worktree').setup({
 - **`copy_envrc = true`**: Automatically copies `.envrc` file from current worktree to new worktrees
 - **Smart copying**: Won't overwrite existing `.envrc` files in target worktree
 - **Seamless workflow**: Environment variables follow you to new worktrees
+
+**Worktree Organization:**
+- **`worktree_dir = ".worktrees"`**: Configures the directory name where all worktrees are aggregated
+- **Centralized location**: All worktrees are organized in one place within your repository
+- **Customizable**: Change the directory name to suit your preferences (e.g., `_worktrees`, `.wt`, etc.)
 
 **Example:** If you have `A/init.lua` open and switch worktrees, the buffer automatically updates to point to the same file in the new worktree location.
 
@@ -161,9 +172,9 @@ The `:GitWorktreeCleanup` command helps you clean up all worktrees at once:
 **Example output:**
 ```
 The following worktrees will be deleted:
-  - feature/ui-update (/repo_feature_ui-update)  
-  - review/pr-123 (/repo_review_pr-123)
-  - hotfix/bug (/repo_hotfix_bug)
+  - feature/ui-update (/repo/.worktrees/feature_ui-update)
+  - review/pr-123 (/repo/.worktrees/review_pr-123)
+  - hotfix/bug (/repo/.worktrees/hotfix_bug)
 
 Delete 3 worktree(s)? (y/N): y
 
