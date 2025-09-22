@@ -9,15 +9,29 @@ M.config = {
   worktree_dir = ".worktrees", -- Directory name for aggregating worktrees
 }
 
+local function command_to_string(cmd)
+  if type(cmd) == "string" then
+    return cmd
+  end
+
+  local parts = {}
+  for _, part in ipairs(cmd) do
+    table.insert(parts, string.format("%q", part))
+  end
+
+  return table.concat(parts, " ")
+end
+
 local function execute_command(cmd)
-  -- Use vim.fn.system for better Neovim integration
+  -- Use vim.fn.system for better Neovim integration and automatic escaping when
+  -- commands are provided as a list.
   local result = vim.fn.system(cmd)
   local exit_code = vim.v.shell_error
-  
+
   if exit_code ~= 0 then
-    return nil, "Command failed: " .. cmd .. " (exit code: " .. exit_code .. ")"
+    return nil, "Command failed: " .. command_to_string(cmd) .. " (exit code: " .. exit_code .. ")"
   end
-  
+
   -- Remove trailing whitespace
   return result:gsub("%s+$", ""), nil
 end
@@ -26,7 +40,7 @@ local function get_git_root()
   -- Use Neovim's built-in function to get current working directory
   local cwd = vim.fn.getcwd()
   
-  local result, err = execute_command("git rev-parse --show-toplevel")
+  local result, err = execute_command({ "git", "rev-parse", "--show-toplevel" })
   if err then
     return nil, "Not in a git repository (current dir: " .. cwd .. ")"
   end
@@ -77,7 +91,7 @@ end
 
 local function find_worktree_location(branch)
   -- Get the list of worktrees and find where this branch is located
-  local result, err = execute_command("git worktree list")
+  local result, err = execute_command({ "git", "worktree", "list" })
   if err then
     return nil, err
   end
@@ -100,7 +114,7 @@ end
 
 local function branch_exists(branch)
   -- Check local branches first
-  local result, err = execute_command("git show-ref --verify --quiet refs/heads/" .. branch)
+  local result, err = execute_command({ "git", "show-ref", "--verify", "--quiet", "refs/heads/" .. branch })
   if not err then
     return true, "local"
   end
@@ -108,7 +122,7 @@ local function branch_exists(branch)
   -- Check remote branches (try common remotes)
   local remotes = {"origin", "upstream"}
   for _, remote in ipairs(remotes) do
-    result, err = execute_command("git show-ref --verify --quiet refs/remotes/" .. remote .. "/" .. branch)
+    result, err = execute_command({ "git", "show-ref", "--verify", "--quiet", "refs/remotes/" .. remote .. "/" .. branch })
     if not err then
       return true, "remote", remote
     end
@@ -119,7 +133,7 @@ end
 
 local function create_branch_from_current(branch)
   -- Create a new branch from current HEAD
-  local result, err = execute_command("git branch " .. branch)
+  local result, err = execute_command({ "git", "branch", branch })
   if err then
     return false, "Failed to create branch: " .. err
   end
@@ -162,7 +176,7 @@ end
 
 local function get_github_remote_info()
   -- Get the remote URL for origin
-  local result, err = execute_command("git remote get-url origin")
+  local result, err = execute_command({ "git", "remote", "get-url", "origin" })
   if err then
     return nil, nil, "No origin remote found"
   end
@@ -194,7 +208,16 @@ local function fetch_pr_info(pr_number)
   end
   
   -- Use GitHub CLI to get PR information
-  local gh_cmd = string.format("gh pr view %s --repo %s/%s --json headRefName,headRepository", pr_number, owner, repo)
+  local gh_cmd = {
+    "gh",
+    "pr",
+    "view",
+    tostring(pr_number),
+    "--repo",
+    string.format("%s/%s", owner, repo),
+    "--json",
+    "headRefName,headRepository",
+  }
   local result, cmd_err = execute_command(gh_cmd)
   if cmd_err then
     return nil, "Failed to fetch PR info. Make sure 'gh' CLI is installed and authenticated: " .. cmd_err
@@ -353,17 +376,25 @@ function M.create_worktree(branch)
   if exists then
     if branch_type == "local" then
       -- Branch exists locally, create worktree from it
-      worktree_cmd = "git worktree add " .. worktree_path .. " " .. branch
+      worktree_cmd = { "git", "worktree", "add", worktree_path, branch }
       print("Creating worktree from existing local branch '" .. branch .. "'...")
     elseif branch_type == "remote" then
       -- Branch exists on remote, create worktree and track remote branch
       local remote = remote_name or "origin"
-      worktree_cmd = "git worktree add " .. worktree_path .. " -b " .. branch .. " " .. remote .. "/" .. branch
+      worktree_cmd = {
+        "git",
+        "worktree",
+        "add",
+        worktree_path,
+        "-b",
+        branch,
+        string.format("%s/%s", remote, branch),
+      }
       print("Creating worktree from remote branch '" .. remote .. "/" .. branch .. "'...")
     end
   else
     -- Branch doesn't exist, create new branch and worktree from current HEAD
-    worktree_cmd = "git worktree add " .. worktree_path .. " -b " .. branch
+    worktree_cmd = { "git", "worktree", "add", worktree_path, "-b", branch }
     print("Creating new branch '" .. branch .. "' and worktree from current HEAD...")
   end
   
@@ -399,7 +430,7 @@ function M.switch_worktree(branch)
     update_buffers(worktree_path)
     
     -- Found the branch in worktree list, switch to it
-    vim.cmd("cd " .. worktree_path)
+    vim.cmd("cd " .. vim.fn.fnameescape(worktree_path))
     print("Switched to worktree: " .. worktree_path .. " [" .. branch .. "]")
     return true, nil
   else
@@ -414,7 +445,7 @@ function M.switch_worktree(branch)
       -- Update/cleanup buffers from old worktree before switching
       update_buffers(expected_path)
       
-      vim.cmd("cd " .. expected_path)
+      vim.cmd("cd " .. vim.fn.fnameescape(expected_path))
       print("Switched to worktree: " .. expected_path)
       return true, nil
     else
@@ -434,7 +465,7 @@ function M.delete_worktree(branch)
     return false, err
   end
   
-  local result, cmd_err = execute_command("git worktree remove " .. worktree_path)
+  local result, cmd_err = execute_command({ "git", "worktree", "remove", worktree_path })
   if cmd_err then
     return false, "Failed to delete worktree: " .. cmd_err
   end
@@ -444,7 +475,7 @@ function M.delete_worktree(branch)
 end
 
 function M.list_worktrees()
-  local result, err = execute_command("git worktree list")
+  local result, err = execute_command({ "git", "worktree", "list" })
   if err then
     return false, err
   end
@@ -455,7 +486,7 @@ function M.list_worktrees()
 end
 
 function M.current_worktree()
-  local branch_result, branch_err = execute_command("git branch --show-current")
+  local branch_result, branch_err = execute_command({ "git", "branch", "--show-current" })
   if branch_err then
     return false, branch_err
   end
@@ -505,17 +536,22 @@ function M.review_pr(pr_number)
     
     -- Add fork as remote if it doesn't exist
     local remote_name = pr_info.fork_owner
-    local add_remote_cmd = string.format("git remote add %s https://github.com/%s/%s.git", 
-                                       remote_name, pr_info.fork_owner, pr_info.repo_name)
+    local add_remote_cmd = {
+      "git",
+      "remote",
+      "add",
+      remote_name,
+      string.format("https://github.com/%s/%s.git", pr_info.fork_owner, pr_info.repo_name),
+    }
     execute_command(add_remote_cmd) -- Don't fail if remote already exists
-    
+
     -- Fetch the fork's branch
-    fetch_cmd = string.format("git fetch %s %s", remote_name, pr_info.branch)
+    fetch_cmd = { "git", "fetch", remote_name, pr_info.branch }
   else
     -- For same-repo PRs, fetch from origin
-    fetch_cmd = string.format("git fetch origin %s", pr_info.branch)
+    fetch_cmd = { "git", "fetch", "origin", pr_info.branch }
   end
-  
+
   print("Fetching PR branch...")
   local fetch_result, fetch_err = execute_command(fetch_cmd)
   if fetch_err then
@@ -525,13 +561,27 @@ function M.review_pr(pr_number)
   -- Create worktree from the fetched branch
   local worktree_cmd
   if pr_info.is_fork then
-    worktree_cmd = string.format("git worktree add %s -b %s %s/%s", 
-                                worktree_path, review_branch, pr_info.fork_owner, pr_info.branch)
+    worktree_cmd = {
+      "git",
+      "worktree",
+      "add",
+      worktree_path,
+      "-b",
+      review_branch,
+      string.format("%s/%s", pr_info.fork_owner, pr_info.branch),
+    }
   else
-    worktree_cmd = string.format("git worktree add %s -b %s origin/%s", 
-                                worktree_path, review_branch, pr_info.branch)
+    worktree_cmd = {
+      "git",
+      "worktree",
+      "add",
+      worktree_path,
+      "-b",
+      review_branch,
+      string.format("origin/%s", pr_info.branch),
+    }
   end
-  
+
   print("Creating review worktree...")
   local result, cmd_err = execute_command(worktree_cmd)
   if cmd_err then
@@ -547,7 +597,7 @@ function M.review_pr(pr_number)
   
   -- Switch to the review worktree
   update_buffers(worktree_path)
-  vim.cmd("cd " .. worktree_path)
+  vim.cmd("cd " .. vim.fn.fnameescape(worktree_path))
   
   print("Created review worktree for PR #" .. pr_num .. " at: " .. worktree_path)
   print("Branch: " .. review_branch .. " (tracking " .. pr_info.branch .. ")")
@@ -557,7 +607,7 @@ end
 
 local function get_all_worktrees_except_current()
   -- Get the list of all worktrees
-  local result, err = execute_command("git worktree list")
+  local result, err = execute_command({ "git", "worktree", "list" })
   if err then
     return nil, err
   end
@@ -617,7 +667,7 @@ function M.cleanup_all_worktrees()
   local failed_worktrees = {}
   
   for _, wt in ipairs(worktrees) do
-    local cmd = "git worktree remove " .. wt.path
+    local cmd = { "git", "worktree", "remove", wt.path }
     local result, cmd_err = execute_command(cmd)
     
     if cmd_err then
