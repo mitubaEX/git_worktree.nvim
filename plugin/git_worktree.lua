@@ -8,11 +8,19 @@ end
 
 vim.api.nvim_create_user_command('GitWorktreeCreate', function(opts)
   local branch = opts.args
-  local success, error_msg = git_worktree.create_worktree(branch)
+  local create_opts = {}
+
+  -- Check for --from-default flag
+  if opts.fargs[1] == "--from-default" then
+    create_opts.from_default_branch = true
+    branch = opts.fargs[2]
+  end
+
+  local success, error_msg = git_worktree.create_worktree(branch, create_opts)
   handle_command_result(success, error_msg)
 end, {
-  nargs = 1,
-  desc = "Create a new worktree for the specified branch"
+  nargs = '+',
+  desc = "Create a new worktree for the specified branch. Use --from-default to create from default branch"
 })
 
 vim.api.nvim_create_user_command('GitWorktreeSwitch', function(opts)

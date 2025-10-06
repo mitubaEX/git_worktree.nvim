@@ -98,13 +98,47 @@ local function find_worktree_location(branch)
   return nil, "Worktree for branch '" .. branch .. "' not found"
 end
 
+local function get_default_branch()
+  -- Try to get the default branch from origin
+  local result, err = execute_command("git symbolic-ref refs/remotes/origin/HEAD")
+  if not err then
+    -- Parse the result to get branch name (e.g., "refs/remotes/origin/main" -> "main")
+    local branch = result:match("refs/remotes/origin/(.+)")
+    if branch then
+      return branch, nil
+    end
+  end
+
+  -- If that fails, try to get it from the remote
+  result, err = execute_command("git remote show origin")
+  if not err then
+    for line in result:gmatch("[^\r\n]+") do
+      local branch = line:match("HEAD branch:%s*(.+)")
+      if branch then
+        return branch, nil
+      end
+    end
+  end
+
+  -- Fallback to common default branch names
+  local common_defaults = {"main", "master"}
+  for _, branch in ipairs(common_defaults) do
+    local exists = execute_command("git show-ref --verify --quiet refs/heads/" .. branch)
+    if exists then
+      return branch, nil
+    end
+  end
+
+  return nil, "Could not determine default branch"
+end
+
 local function branch_exists(branch)
   -- Check local branches first
   local result, err = execute_command("git show-ref --verify --quiet refs/heads/" .. branch)
   if not err then
     return true, "local"
   end
-  
+
   -- Check remote branches (try common remotes)
   local remotes = {"origin", "upstream"}
   for _, remote in ipairs(remotes) do
@@ -113,7 +147,7 @@ local function branch_exists(branch)
       return true, "remote", remote
     end
   end
-  
+
   return false, nil, nil
 end
 
@@ -335,21 +369,23 @@ local function update_buffers(new_path)
   end
 end
 
-function M.create_worktree(branch)
+function M.create_worktree(branch, opts)
+  opts = opts or {}
+
   local valid, err = validate_branch_name(branch)
   if not valid then
     return false, err
   end
-  
+
   local worktree_path, err = get_worktree_path(branch)
   if err then
     return false, err
   end
-  
+
   -- Check if branch exists
   local exists, branch_type, remote_name = branch_exists(branch)
   local worktree_cmd
-  
+
   if exists then
     if branch_type == "local" then
       -- Branch exists locally, create worktree from it
@@ -362,17 +398,34 @@ function M.create_worktree(branch)
       print("Creating worktree from remote branch '" .. remote .. "/" .. branch .. "'...")
     end
   else
-    -- Branch doesn't exist, create new branch and worktree from current HEAD
-    worktree_cmd = "git worktree add " .. worktree_path .. " -b " .. branch
-    print("Creating new branch '" .. branch .. "' and worktree from current HEAD...")
+    -- Branch doesn't exist, determine base branch
+    local base_branch
+    if opts.from_default_branch then
+      -- Create from default branch
+      local default_branch, default_err = get_default_branch()
+      if default_err then
+        return false, default_err
+      end
+      base_branch = default_branch
+      print("Creating new branch '" .. branch .. "' and worktree from default branch '" .. base_branch .. "'...")
+    else
+      -- Create from current HEAD (default behavior)
+      print("Creating new branch '" .. branch .. "' and worktree from current HEAD...")
+    end
+
+    if base_branch then
+      worktree_cmd = "git worktree add " .. worktree_path .. " -b " .. branch .. " " .. base_branch
+    else
+      worktree_cmd = "git worktree add " .. worktree_path .. " -b " .. branch
+    end
   end
-  
+
   -- Execute the worktree creation command
   local result, cmd_err = execute_command(worktree_cmd)
   if cmd_err then
     return false, "Failed to create worktree: " .. cmd_err
   end
-  
+
   -- Copy .envrc file from current directory to new worktree
   local current_dir = vim.fn.getcwd()
   local copy_success, copy_err = copy_envrc_file(current_dir, worktree_path)
@@ -380,7 +433,7 @@ function M.create_worktree(branch)
     -- Don't fail the entire operation if .envrc copy fails, just warn
     print("Warning: " .. copy_err)
   end
-  
+
   print("Created worktree for branch '" .. branch .. "' at: " .. worktree_path)
   return true, nil
 end

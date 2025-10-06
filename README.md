@@ -37,6 +37,7 @@ use {
 | Command | Description |
 |---------|-------------|
 | `:GitWorktreeCreate <branch>` | Create worktree (and branch if needed) |
+| `:GitWorktreeCreate --from-default <branch>` | Create worktree from default branch |
 | `:GitWorktreeSwitch <branch>` | Switch to branch worktree |
 | `:GitWorktreeDelete <branch>` | Delete branch worktree |
 | `:GitWorktreeList` | List all worktrees |
@@ -67,7 +68,8 @@ use {
 :Telescope git_worktree              " Interactive picker
 " <Enter> - Switch to worktree
 " <C-d>   - Delete worktree (not current)
-" <C-n>   - Create new worktree
+" <C-n>   - Create new worktree from current HEAD
+" <C-m>   - Create new worktree from default branch
 
 :Telescope git_worktree create       " Create from branches
 ```
@@ -132,12 +134,33 @@ The plugin automatically handles different branch scenarios:
 - **Existing local branch**: Creates worktree from the local branch
 - **Existing remote branch**: Creates local branch tracking the remote and creates worktree
 - **New branch**: Creates both the branch and worktree from current HEAD
+- **New branch from default**: Creates both the branch and worktree from the default branch (main/master)
 
 ```vim
-:GitWorktreeCreate feature/new-ui    " Creates branch + worktree if branch doesn't exist
-:GitWorktreeCreate existing-branch   " Uses existing branch for worktree
-:GitWorktreeCreate origin-branch     " Creates local branch tracking remote + worktree
+:GitWorktreeCreate feature/new-ui              " Creates branch + worktree from current HEAD
+:GitWorktreeCreate --from-default feature/ui   " Creates branch + worktree from default branch
+:GitWorktreeCreate existing-branch             " Uses existing branch for worktree
+:GitWorktreeCreate origin-branch               " Creates local branch tracking remote + worktree
 ```
+
+### Creating from Default Branch
+
+When you want to create a new feature branch from the repository's default branch (usually `main` or `master`), use the `--from-default` flag:
+
+```vim
+" You're on feature/old-work branch, but want to start a new feature from main
+:GitWorktreeCreate --from-default feature/new-work
+```
+
+This is particularly useful when:
+- You're currently on a feature branch but want to start fresh from main
+- You want to ensure new work starts from the latest default branch state
+- You're creating multiple independent features
+
+The plugin automatically detects the default branch by:
+1. Checking `git symbolic-ref refs/remotes/origin/HEAD`
+2. Querying `git remote show origin` for the HEAD branch
+3. Falling back to common defaults (`main`, `master`)
 
 ## GitHub PR Review
 
