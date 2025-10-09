@@ -550,41 +550,51 @@ function M.review_pr(pr_number)
     return false, path_err
   end
   
+  -- Check if the branch already exists locally
+  local branch_exists_locally, _, _ = branch_exists(review_branch)
+
   -- Fetch the PR branch
   local fetch_cmd
   if pr_info.is_fork then
     -- For forks, we need to fetch from the fork's remote
     print("Fetching from fork: " .. pr_info.fork_owner .. "/" .. pr_info.repo_name)
-    
+
     -- Add fork as remote if it doesn't exist
     local remote_name = pr_info.fork_owner
-    local add_remote_cmd = string.format("git remote add %s https://github.com/%s/%s.git", 
+    local add_remote_cmd = string.format("git remote add %s https://github.com/%s/%s.git",
                                        remote_name, pr_info.fork_owner, pr_info.repo_name)
     execute_command(add_remote_cmd) -- Don't fail if remote already exists
-    
+
     -- Fetch the fork's branch
     fetch_cmd = string.format("git fetch %s %s", remote_name, pr_info.branch)
   else
     -- For same-repo PRs, fetch from origin
     fetch_cmd = string.format("git fetch origin %s", pr_info.branch)
   end
-  
+
   print("Fetching PR branch...")
   local fetch_result, fetch_err = execute_command(fetch_cmd)
   if fetch_err then
     return false, "Failed to fetch PR branch: " .. fetch_err
   end
-  
+
   -- Create worktree from the fetched branch
   local worktree_cmd
-  if pr_info.is_fork then
-    worktree_cmd = string.format("git worktree add %s -b %s %s/%s", 
-                                worktree_path, review_branch, pr_info.fork_owner, pr_info.branch)
+  if branch_exists_locally then
+    -- Branch already exists locally, use it directly
+    print("Using existing local branch '" .. review_branch .. "'...")
+    worktree_cmd = string.format("git worktree add %s %s", worktree_path, review_branch)
   else
-    worktree_cmd = string.format("git worktree add %s -b %s origin/%s", 
-                                worktree_path, review_branch, pr_info.branch)
+    -- Branch doesn't exist locally, create it from remote
+    if pr_info.is_fork then
+      worktree_cmd = string.format("git worktree add %s -b %s %s/%s",
+                                  worktree_path, review_branch, pr_info.fork_owner, pr_info.branch)
+    else
+      worktree_cmd = string.format("git worktree add %s -b %s origin/%s",
+                                  worktree_path, review_branch, pr_info.branch)
+    end
   end
-  
+
   print("Creating worktree for PR branch...")
   local result, cmd_err = execute_command(worktree_cmd)
   if cmd_err then

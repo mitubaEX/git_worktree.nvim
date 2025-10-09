@@ -1,0 +1,60 @@
+name: Test
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Fetch all history for git worktree commands
+
+    - name: Install Neovim
+      uses: rhysd/action-setup-vim@v1
+      with:
+        neovim: true
+        version: stable
+
+    - name: Verify Neovim installation
+      run: nvim --version
+
+    - name: Setup git config
+      run: |
+        git config --global user.name "CI Test"
+        git config --global user.email "ci@test.com"
+
+    - name: Run basic tests
+      run: |
+        nvim --headless -u NONE \
+          -c "set rtp+=." \
+          -c "luafile test_commands.lua" \
+          -c "qa"
+
+    - name: Run cleanup test
+      run: |
+        nvim --headless -u NONE \
+          -c "set rtp+=." \
+          -c "luafile test_cleanup.lua" \
+          -c "qa"
+
+    - name: Run review fix test
+      run: |
+        nvim --headless -u NONE \
+          -c "set rtp+=." \
+          -c "luafile test_review_fix.lua" \
+          -c "qa"
+
+    - name: Clean up worktrees
+      if: always()
+      run: |
+        git worktree list
+        # Remove any remaining test worktrees
+        git worktree list | grep -v "$(pwd)" | awk '{print $1}' | xargs -r -I {} git worktree remove {} --force || true
+        git branch | grep "test/" | xargs -r git branch -D || true

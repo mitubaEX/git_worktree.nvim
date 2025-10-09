@@ -228,6 +228,31 @@ Plugin structure:
 - `plugin/git_worktree.lua` - Command definitions
 - `lua/telescope/_extensions/git_worktree.lua` - Telescope integration
 
+### Testing
+
+Run the test suite:
+
+```bash
+# Run all tests
+make test
+
+# Run individual test suites
+make test-basic    # Basic command tests
+make test-cleanup  # Cleanup functionality test
+make test-review   # Review PR fix test
+
+# Clean up test artifacts
+make clean
+```
+
+The test suite includes:
+- **Basic commands**: Create, switch, delete, list worktrees
+- **Error handling**: Invalid inputs and edge cases
+- **Cleanup functionality**: Bulk worktree removal
+- **Review fix**: Existing branch handling for PR reviews
+
+CI runs automatically on push and pull requests via GitHub Actions.
+
 ## License
 
 MIT
