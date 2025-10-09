@@ -542,9 +542,9 @@ function M.review_pr(pr_number)
   end
   
   print("Found PR branch: " .. pr_info.branch .. (pr_info.is_fork and " (from fork: " .. pr_info.fork_owner .. ")" or ""))
-  
-  -- Create a review branch name
-  local review_branch = "review/pr-" .. pr_num
+
+  -- Use the PR's actual branch name
+  local review_branch = pr_info.branch
   local worktree_path, path_err = get_worktree_path(review_branch)
   if path_err then
     return false, path_err
@@ -585,10 +585,10 @@ function M.review_pr(pr_number)
                                 worktree_path, review_branch, pr_info.branch)
   end
   
-  print("Creating review worktree...")
+  print("Creating worktree for PR branch...")
   local result, cmd_err = execute_command(worktree_cmd)
   if cmd_err then
-    return false, "Failed to create review worktree: " .. cmd_err
+    return false, "Failed to create worktree: " .. cmd_err
   end
   
   -- Copy .envrc file
@@ -602,8 +602,8 @@ function M.review_pr(pr_number)
   update_buffers(worktree_path)
   vim.cmd("cd " .. worktree_path)
   
-  print("Created review worktree for PR #" .. pr_num .. " at: " .. worktree_path)
-  print("Branch: " .. review_branch .. " (tracking " .. pr_info.branch .. ")")
+  print("Created worktree for PR #" .. pr_num .. " at: " .. worktree_path)
+  print("Branch: " .. pr_info.branch)
   
   return true, nil
 end

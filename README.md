@@ -91,7 +91,7 @@ my-repo/
 ├── .worktrees/           # Aggregated worktree directory
 │   ├── feature_ui/       # Feature branch worktree
 │   ├── hotfix/           # Hotfix branch worktree
-│   └── review_pr-123/    # PR review worktree
+│   └── feature_pr-fix/   # PR branch worktree (from GitWorktreeReview)
 ├── src/                  # Your source code
 └── README.md             # Your files
 ```
@@ -167,12 +167,12 @@ The plugin automatically detects the default branch by:
 The `:GitWorktreeReview` command streamlines code review by automatically:
 
 1. **Fetching PR information** using GitHub CLI
-2. **Creating a dedicated review worktree** with branch name `review/pr-<number>`
+2. **Creating a worktree** using the PR's actual branch name (e.g., `feature/new-ui`)
 3. **Handling forks** by adding remote and fetching the PR branch
-4. **Switching to the review worktree** automatically
+4. **Switching to the worktree** automatically
 
 ```vim
-:GitWorktreeReview 123    " Reviews PR #123
+:GitWorktreeReview 123    " Reviews PR #123 by creating worktree with PR's branch name
 ```
 
 **Requirements for PR review:**
@@ -196,14 +196,14 @@ The `:GitWorktreeCleanup` command helps you clean up all worktrees at once:
 ```
 The following worktrees will be deleted:
   - feature/ui-update (/repo/.worktrees/feature_ui-update)
-  - review/pr-123 (/repo/.worktrees/review_pr-123)
+  - feature/pr-fix (/repo/.worktrees/feature_pr-fix)
   - hotfix/bug (/repo/.worktrees/hotfix_bug)
 
 Delete 3 worktree(s)? (y/N): y
 
 Deleting worktrees...
 Deleted worktree: feature/ui-update
-Deleted worktree: review/pr-123  
+Deleted worktree: feature/pr-fix
 Failed to delete hotfix/bug: worktree contains modified or untracked files
 
 Cleanup completed:
