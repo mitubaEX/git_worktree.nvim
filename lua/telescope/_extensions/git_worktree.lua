@@ -88,7 +88,7 @@ local function worktree_picker(opts)
         end)
       end)
 
-      map('i', '<C-m>', function()
+      map('i', '<C-f>', function()
         actions.close(prompt_bufnr)
         vim.ui.input({ prompt = 'Branch name (from default branch): ' }, function(branch)
           if branch and branch ~= "" then
