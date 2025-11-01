@@ -51,7 +51,7 @@ local function ensure_worktree_directory(git_root)
 
   if not stat then
     -- Create the worktree aggregate directory
-    local success, err_name, err_msg = vim.loop.fs_mkdir(worktree_dir, 755)
+    local success, err_name, err_msg = vim.loop.fs_mkdir(worktree_dir, 511)  -- 511 in decimal = 777 in octal
     if not success then
       return nil, "Failed to create worktree directory: " .. (err_msg or err_name or "Unknown error")
     end
