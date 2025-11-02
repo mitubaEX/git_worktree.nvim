@@ -7,29 +7,74 @@ local function handle_command_result(success, error_msg)
 end
 
 vim.api.nvim_create_user_command('GitWorktreeCreate', function(opts)
-  local branch = opts.args
   local create_opts = {}
+  local branch = nil
+  local i = 1
 
-  -- Check for --from-default flag
-  if opts.fargs[1] == "--from-default" then
-    create_opts.from_default_branch = true
-    branch = opts.fargs[2]
+  -- Parse flags and arguments
+  while i <= #opts.fargs do
+    local arg = opts.fargs[i]
+    if arg == "--from-default" then
+      create_opts.from_default_branch = true
+      i = i + 1
+    elseif arg == "--command" or arg == "--cmd" then
+      -- Next argument is the command
+      i = i + 1
+      if i <= #opts.fargs then
+        create_opts.command = opts.fargs[i]
+        i = i + 1
+      end
+    else
+      -- This is the branch name
+      branch = arg
+      i = i + 1
+    end
+  end
+
+  if not branch then
+    vim.api.nvim_err_writeln("Error: Branch name is required")
+    return
   end
 
   local success, error_msg = git_worktree.create_worktree(branch, create_opts)
   handle_command_result(success, error_msg)
 end, {
   nargs = '+',
-  desc = "Create a new worktree for the specified branch. Use --from-default to create from default branch"
+  desc = "Create a new worktree for the specified branch. Use --from-default to create from default branch, --command to run nvim command after creation"
 })
 
 vim.api.nvim_create_user_command('GitWorktreeSwitch', function(opts)
-  local branch = opts.args
-  local success, error_msg = git_worktree.switch_worktree(branch)
+  local switch_opts = {}
+  local branch = nil
+  local i = 1
+
+  -- Parse flags and arguments
+  while i <= #opts.fargs do
+    local arg = opts.fargs[i]
+    if arg == "--command" or arg == "--cmd" then
+      -- Next argument is the command
+      i = i + 1
+      if i <= #opts.fargs then
+        switch_opts.command = opts.fargs[i]
+        i = i + 1
+      end
+    else
+      -- This is the branch name
+      branch = arg
+      i = i + 1
+    end
+  end
+
+  if not branch then
+    vim.api.nvim_err_writeln("Error: Branch name is required")
+    return
+  end
+
+  local success, error_msg = git_worktree.switch_worktree(branch, switch_opts)
   handle_command_result(success, error_msg)
 end, {
-  nargs = 1,
-  desc = "Switch to the specified branch's worktree"
+  nargs = '+',
+  desc = "Switch to the specified branch's worktree. Use --command to run nvim command after switching"
 })
 
 vim.api.nvim_create_user_command('GitWorktreeDelete', function(opts)
@@ -58,12 +103,37 @@ end, {
 })
 
 vim.api.nvim_create_user_command('GitWorktreeReview', function(opts)
-  local pr_number = opts.args
-  local success, error_msg = git_worktree.review_pr(pr_number)
+  local review_opts = {}
+  local pr_number = nil
+  local i = 1
+
+  -- Parse flags and arguments
+  while i <= #opts.fargs do
+    local arg = opts.fargs[i]
+    if arg == "--command" or arg == "--cmd" then
+      -- Next argument is the command
+      i = i + 1
+      if i <= #opts.fargs then
+        review_opts.command = opts.fargs[i]
+        i = i + 1
+      end
+    else
+      -- This is the PR number
+      pr_number = arg
+      i = i + 1
+    end
+  end
+
+  if not pr_number then
+    vim.api.nvim_err_writeln("Error: PR number is required")
+    return
+  end
+
+  local success, error_msg = git_worktree.review_pr(pr_number, review_opts)
   handle_command_result(success, error_msg)
 end, {
-  nargs = 1,
-  desc = "Create worktree for GitHub PR review"
+  nargs = '+',
+  desc = "Create worktree for GitHub PR review. Use --command to run nvim command after creation"
 })
 
 vim.api.nvim_create_user_command('GitWorktreeCleanup', function()

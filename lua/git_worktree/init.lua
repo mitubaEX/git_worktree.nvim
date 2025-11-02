@@ -25,12 +25,28 @@ end
 local function get_git_root()
   -- Use Neovim's built-in function to get current working directory
   local cwd = vim.fn.getcwd()
-  
-  local result, err = execute_command("git rev-parse --show-toplevel")
+
+  -- Get the main worktree root (not the current worktree)
+  -- Use git worktree list to find the main worktree
+  local result, err = execute_command("git worktree list")
   if err then
     return nil, "Not in a git repository (current dir: " .. cwd .. ")"
   end
-  return result, nil
+
+  -- The first line of worktree list is always the main worktree
+  -- Format: /path/to/worktree  commit_hash [branch_name]
+  local first_line = result:match("^([^\r\n]+)")
+  if not first_line then
+    return nil, "Could not parse git worktree list"
+  end
+
+  -- Extract the path (everything before the first whitespace)
+  local main_worktree = first_line:match("^(%S+)")
+  if not main_worktree then
+    return nil, "Could not determine main worktree path"
+  end
+
+  return main_worktree, nil
 end
 
 local function validate_branch_name(branch)
@@ -434,26 +450,56 @@ function M.create_worktree(branch, opts)
     print("Warning: " .. copy_err)
   end
 
+  -- Switch to the newly created worktree
+  update_buffers(worktree_path)
+  vim.cmd("cd " .. worktree_path)
+
   print("Created worktree for branch '" .. branch .. "' at: " .. worktree_path)
+
+  -- Execute post-creation command if provided
+  if opts.command then
+    if type(opts.command) == "string" then
+      vim.cmd(opts.command)
+    elseif type(opts.command) == "table" then
+      for _, cmd in ipairs(opts.command) do
+        vim.cmd(cmd)
+      end
+    end
+  end
+
   return true, nil
 end
 
-function M.switch_worktree(branch)
+function M.switch_worktree(branch, opts)
+  opts = opts or {}
+
   local valid, err = validate_branch_name(branch)
   if not valid then
     return false, err
   end
-  
+
   -- First, try to find the branch in the existing worktree list
   local worktree_path, find_err = find_worktree_location(branch)
-  
+
   if worktree_path then
     -- Update/cleanup buffers from old worktree before switching
     update_buffers(worktree_path)
-    
+
     -- Found the branch in worktree list, switch to it
     vim.cmd("cd " .. worktree_path)
     print("Switched to worktree: " .. worktree_path .. " [" .. branch .. "]")
+
+    -- Execute post-switch command if provided
+    if opts.command then
+      if type(opts.command) == "string" then
+        vim.cmd(opts.command)
+      elseif type(opts.command) == "table" then
+        for _, cmd in ipairs(opts.command) do
+          vim.cmd(cmd)
+        end
+      end
+    end
+
     return true, nil
   else
     -- Branch not found in worktree list, try the expected worktree path
@@ -461,14 +507,26 @@ function M.switch_worktree(branch)
     if path_err then
       return false, path_err
     end
-    
+
     local stat = vim.loop.fs_stat(expected_path)
     if stat then
       -- Update/cleanup buffers from old worktree before switching
       update_buffers(expected_path)
-      
+
       vim.cmd("cd " .. expected_path)
       print("Switched to worktree: " .. expected_path)
+
+      -- Execute post-switch command if provided
+      if opts.command then
+        if type(opts.command) == "string" then
+          vim.cmd(opts.command)
+        elseif type(opts.command) == "table" then
+          for _, cmd in ipairs(opts.command) do
+            vim.cmd(cmd)
+          end
+        end
+      end
+
       return true, nil
     else
       return false, "Worktree for branch '" .. branch .. "' does not exist. Use :GitWorktreeCreate " .. branch .. " to create it first."
@@ -521,12 +579,14 @@ function M.current_worktree()
   return true, nil
 end
 
-function M.review_pr(pr_number)
+function M.review_pr(pr_number, opts)
+  opts = opts or {}
+
   -- Validate PR number
   if not pr_number or pr_number == "" then
     return false, "PR number is required"
   end
-  
+
   -- Convert to number and validate
   local pr_num = tonumber(pr_number)
   if not pr_num or pr_num <= 0 then
@@ -611,10 +671,21 @@ function M.review_pr(pr_number)
   -- Switch to the review worktree
   update_buffers(worktree_path)
   vim.cmd("cd " .. worktree_path)
-  
+
   print("Created worktree for PR #" .. pr_num .. " at: " .. worktree_path)
   print("Branch: " .. pr_info.branch)
-  
+
+  -- Execute post-creation command if provided
+  if opts.command then
+    if type(opts.command) == "string" then
+      vim.cmd(opts.command)
+    elseif type(opts.command) == "table" then
+      for _, cmd in ipairs(opts.command) do
+        vim.cmd(cmd)
+      end
+    end
+  end
+
   return true, nil
 end
 
