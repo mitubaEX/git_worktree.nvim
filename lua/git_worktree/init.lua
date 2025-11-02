@@ -23,14 +23,11 @@ local function execute_command(cmd)
 end
 
 local function get_git_root()
-  -- Use Neovim's built-in function to get current working directory
-  local cwd = vim.fn.getcwd()
-
   -- Get the main worktree root (not the current worktree)
   -- Use git worktree list to find the main worktree
   local result, err = execute_command("git worktree list")
   if err then
-    return nil, "Not in a git repository (current dir: " .. cwd .. ")"
+    return nil, "Not in a git repository"
   end
 
   -- The first line of worktree list is always the main worktree
