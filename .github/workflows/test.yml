@@ -30,26 +30,12 @@ jobs:
         git config --global user.name "CI Test"
         git config --global user.email "ci@test.com"
 
-    - name: Run basic tests
+    - name: Install plenary.nvim
       run: |
-        nvim --headless -u NONE \
-          -c "set rtp+=." \
-          -c "luafile test_commands.lua" \
-          -c "qa"
+        git clone --depth=1 https://github.com/nvim-lua/plenary.nvim /tmp/plenary.nvim
 
-    - name: Run cleanup test
-      run: |
-        nvim --headless -u NONE \
-          -c "set rtp+=." \
-          -c "luafile test_cleanup.lua" \
-          -c "qa"
-
-    - name: Run review fix test
-      run: |
-        nvim --headless -u NONE \
-          -c "set rtp+=." \
-          -c "luafile test_review_fix.lua" \
-          -c "qa"
+    - name: Run tests
+      run: make test
 
     - name: Clean up worktrees
       if: always()

@@ -1,48 +1,29 @@
-.PHONY: test test-basic test-cleanup test-review clean
+.PHONY: test
+test:
+	@echo "Running tests with plenary..."
+	nvim --headless --noplugin -u tests/minimal_init.lua \
+		-c "PlenaryBustedDirectory tests/ { minimal_init = 'tests/minimal_init.lua' }"
 
-# Run all tests
-test: test-basic test-cleanup test-review
-	@echo ""
-	@echo "✓ All tests passed!"
+.PHONY: test-watch
+test-watch:
+	@echo "Running tests in watch mode..."
+	while true; do \
+		make test; \
+		inotifywait -qre close_write lua/ tests/ plugin/; \
+	done
 
-# Run basic command tests
-test-basic:
-	@echo "Running basic command tests..."
-	@nvim --headless -u NONE \
-		-c "set rtp+=." \
-		-c "luafile test_commands.lua" \
-		-c "qa"
+.PHONY: lint
+lint:
+	@echo "Running stylua..."
+	stylua --check lua/ tests/ plugin/
 
-# Run cleanup test
-test-cleanup:
-	@echo "Running cleanup test..."
-	@nvim --headless -u NONE \
-		-c "set rtp+=." \
-		-c "luafile test_cleanup.lua" \
-		-c "qa"
+.PHONY: format
+format:
+	@echo "Formatting code with stylua..."
+	stylua lua/ tests/ plugin/
 
-# Run review fix test
-test-review:
-	@echo "Running review fix test..."
-	@nvim --headless -u NONE \
-		-c "set rtp+=." \
-		-c "luafile test_review_fix.lua" \
-		-c "qa"
-
-# Clean up any remaining test worktrees and branches
+.PHONY: clean
 clean:
-	@echo "Cleaning up test worktrees and branches..."
-	@git worktree list | grep -v "$(shell pwd)" | awk '{print $$1}' | xargs -r -I {} git worktree remove {} --force 2>/dev/null || true
-	@git branch | grep "test/" | xargs -r git branch -D 2>/dev/null || true
-	@git branch | grep "feature/pr-test" | xargs -r git branch -D 2>/dev/null || true
-	@echo "Cleanup completed"
-
-# Show help
-help:
-	@echo "Available targets:"
-	@echo "  test         - Run all tests"
-	@echo "  test-basic   - Run basic command tests"
-	@echo "  test-cleanup - Run cleanup test"
-	@echo "  test-review  - Run review fix test"
-	@echo "  clean        - Clean up test worktrees and branches"
-	@echo "  help         - Show this help message"
+	@echo "Cleaning up test artifacts..."
+	@git worktree list | grep -v "$$(pwd)" | awk '{print $$1}' | xargs -r -I {} git worktree remove {} --force || true
+	@git branch | grep "test/" | xargs -r git branch -D || true

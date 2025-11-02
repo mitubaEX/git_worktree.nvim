@@ -38,12 +38,49 @@ use {
 |---------|-------------|
 | `:GitWorktreeCreate <branch>` | Create worktree (and branch if needed) |
 | `:GitWorktreeCreate --from-default <branch>` | Create worktree from default branch |
+| `:GitWorktreeCreate <branch> --command <cmd>` | Create worktree and run Neovim command |
 | `:GitWorktreeSwitch <branch>` | Switch to branch worktree |
+| `:GitWorktreeSwitch <branch> --command <cmd>` | Switch worktree and run Neovim command |
 | `:GitWorktreeDelete <branch>` | Delete branch worktree |
 | `:GitWorktreeList` | List all worktrees |
 | `:GitWorktreeCurrent` | Show current branch/worktree |
 | `:GitWorktreeReview <pr_number>` | Create worktree for GitHub PR review |
+| `:GitWorktreeReview <pr_number> --command <cmd>` | Review PR and run Neovim command |
 | `:GitWorktreeCleanup` | Remove all worktrees except current |
+
+**Command Execution Examples:**
+```vim
+" Open Telescope file finder after creating worktree
+:GitWorktreeCreate feature/new-ui --command "Telescope find_files"
+
+" Open specific file after switching
+:GitWorktreeSwitch main --cmd "edit README.md"
+
+" Open diff view after PR review
+:GitWorktreeReview 123 --command "DiffviewOpen"
+
+" Multiple flags work together
+:GitWorktreeCreate --from-default feature/new --command "Oil"
+```
+
+**Lua API:**
+```lua
+-- Single command
+require('git_worktree').create_worktree('feature/new', {
+  command = "Telescope find_files"
+})
+
+-- Multiple commands
+require('git_worktree').create_worktree('feature/new', {
+  command = {"edit README.md", "vsplit src/main.lua"}
+})
+
+-- With other options
+require('git_worktree').create_worktree('feature/new', {
+  from_default_branch = true,
+  command = "Telescope find_files"
+})
+```
 
 ### Telescope Commands
 | Command | Description |
@@ -230,26 +267,49 @@ Plugin structure:
 
 ### Testing
 
+This plugin uses [plenary.nvim](https://github.com/nvim-lua/plenary.nvim) for testing with a modern test framework.
+
 Run the test suite:
 
 ```bash
 # Run all tests
 make test
 
-# Run individual test suites
-make test-basic    # Basic command tests
-make test-cleanup  # Cleanup functionality test
-make test-review   # Review PR fix test
+# Watch mode (requires inotifywait)
+make test-watch
+
+# Format code
+make format
+
+# Lint code
+make lint
 
 # Clean up test artifacts
 make clean
 ```
 
-The test suite includes:
-- **Basic commands**: Create, switch, delete, list worktrees
-- **Error handling**: Invalid inputs and edge cases
-- **Cleanup functionality**: Bulk worktree removal
-- **Review fix**: Existing branch handling for PR reviews
+**Test Structure:**
+- `tests/git_worktree_spec.lua` - Main test suite using plenary's busted-style testing
+- `tests/minimal_init.lua` - Minimal Neovim configuration for tests
+- Modern `describe`/`it` blocks for clear test organization
+- `before_each`/`after_each` hooks for proper setup/teardown
+
+**Example test:**
+```lua
+describe("create_worktree", function()
+  it("creates worktree from HEAD", function()
+    local success, err = git_worktree.create_worktree("test/branch", {})
+    assert.is_true(success, err)
+  end)
+end)
+```
+
+The test suite covers:
+- Worktree creation, switching, and deletion
+- Command execution (--command flag)
+- Error handling and edge cases
+- Buffer management
+- Multiple command execution
 
 CI runs automatically on push and pull requests via GitHub Actions.
 
