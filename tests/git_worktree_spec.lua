@@ -104,7 +104,7 @@ describe("git_worktree", function()
       assert.is_true(success, err)
 
       -- Delete worktree but keep branch
-      git_worktree.switch_worktree("main")
+      vim.cmd("cd " .. original_cwd)
       git_worktree.delete_worktree(test_branch)
 
       -- Create again from existing branch
@@ -137,7 +137,8 @@ describe("git_worktree", function()
       success, err = git_worktree.switch_worktree(test_branch_2)
       assert.is_true(success, err)
 
-      success, err = git_worktree.switch_worktree("main")
+      -- Switch back to test_branch_1 to test switching again
+      success, err = git_worktree.switch_worktree(test_branch_1)
       assert.is_true(success, err)
     end)
 
