@@ -1,7 +1,17 @@
 local git_worktree = require("git_worktree")
 
 describe("git_worktree", function()
+  local original_cwd
+
   before_each(function()
+    -- Save the original working directory (only once)
+    if not original_cwd then
+      original_cwd = vim.fn.getcwd()
+    end
+
+    -- Always return to original directory before each test
+    vim.cmd("cd " .. original_cwd)
+
     git_worktree.setup({
       cleanup_buffers = true,
       warn_unsaved = true,
@@ -39,8 +49,8 @@ describe("git_worktree", function()
     local test_branch = "test/feature-create"
 
     after_each(function()
-      -- Cleanup: switch to main and delete test worktree
-      pcall(git_worktree.switch_worktree, "main")
+      -- Cleanup: return to original directory first, then delete test worktree
+      vim.cmd("cd " .. original_cwd)
       pcall(git_worktree.delete_worktree, test_branch)
     end)
 
@@ -114,8 +124,8 @@ describe("git_worktree", function()
     end)
 
     after_each(function()
-      -- Cleanup
-      pcall(git_worktree.switch_worktree, "main")
+      -- Cleanup: return to original directory first
+      vim.cmd("cd " .. original_cwd)
       pcall(git_worktree.delete_worktree, test_branch_1)
       pcall(git_worktree.delete_worktree, test_branch_2)
     end)
@@ -165,7 +175,13 @@ describe("git_worktree", function()
 
     before_each(function()
       git_worktree.create_worktree(test_branch, {})
-      git_worktree.switch_worktree("main")
+      -- Return to original directory so we can delete the worktree
+      vim.cmd("cd " .. original_cwd)
+    end)
+
+    after_each(function()
+      -- Cleanup: ensure we're back in original directory
+      vim.cmd("cd " .. original_cwd)
     end)
 
     it("deletes worktree", function()
@@ -184,7 +200,7 @@ describe("git_worktree", function()
     local test_branch = "test/commands"
 
     after_each(function()
-      pcall(git_worktree.switch_worktree, "main")
+      vim.cmd("cd " .. original_cwd)
       pcall(git_worktree.delete_worktree, test_branch)
     end)
 
