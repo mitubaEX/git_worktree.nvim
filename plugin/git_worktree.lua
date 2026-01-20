@@ -143,3 +143,11 @@ end, {
   nargs = 0,
   desc = "Remove all worktrees except current (with confirmation)"
 })
+
+vim.api.nvim_create_user_command('GitWorktreeForceCleanup', function()
+  local success, error_msg = git_worktree.force_cleanup_all_worktrees()
+  handle_command_result(success, error_msg)
+end, {
+  nargs = 0,
+  desc = "Force remove all worktrees except current, discarding all uncommitted changes"
+})
