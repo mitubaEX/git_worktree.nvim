@@ -47,6 +47,7 @@ use {
 | `:GitWorktreeReview <pr_number>` | Create worktree for GitHub PR review |
 | `:GitWorktreeReview <pr_number> --command <cmd>` | Review PR and run Neovim command |
 | `:GitWorktreeCleanup` | Remove all worktrees except current |
+| `:GitWorktreeForceCleanup` | Force remove all worktrees (discards uncommitted changes) |
 
 **Command Execution Examples:**
 ```vim
@@ -248,6 +249,37 @@ Cleanup completed:
   - 1 worktrees failed to delete
 
 Tip: Use 'git worktree remove --force <path>' to force delete
+```
+
+### Force Cleanup
+
+If you want to forcefully remove all worktrees regardless of uncommitted changes, use `:GitWorktreeForceCleanup`:
+
+```vim
+:GitWorktreeForceCleanup
+```
+
+**WARNING**: This command will:
+1. **Discard ALL uncommitted changes** (staged, unstaged, and untracked files)
+2. Force delete all worktrees except the current one
+
+This is useful when you want to quickly clean up all worktrees without manually handling uncommitted changes.
+
+**Example output:**
+```
+The following worktrees will be FORCE deleted:
+  - feature/ui-update (/repo/.worktrees/feature_ui-update)
+  - feature/pr-fix (/repo/.worktrees/feature_pr-fix)
+
+WARNING: This will discard ALL uncommitted changes in these worktrees!
+Force delete 2 worktree(s)? (y/N): y
+
+Deleting worktrees...
+Force deleted worktree: feature/ui-update
+Force deleted worktree: feature/pr-fix
+
+Force cleanup completed:
+  - 2 worktrees deleted
 ```
 
 ## Requirements
