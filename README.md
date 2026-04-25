@@ -14,8 +14,8 @@ A Neovim plugin for managing Git worktrees with Telescope integration.
       cleanup_buffers = true,  -- Clean up old buffers when switching
       warn_unsaved = true,     -- Warn about unsaved changes
       update_buffers = true,   -- Update buffer paths to new worktree
-      copy_envrc = true,       -- Copy .envrc file to new worktrees (direnv)
       worktree_dir = ".worktrees", -- Directory for aggregating worktrees
+      worktreeinclude_file = ".worktreeinclude", -- File listing extra paths to copy
     })
     require('telescope').load_extension('git_worktree')
   end
@@ -143,8 +143,8 @@ require('git_worktree').setup({
   cleanup_buffers = true,  -- Clean up old buffers when switching
   warn_unsaved = true,     -- Warn about unsaved changes in buffers
   update_buffers = true,   -- Update buffer paths to match new worktree
-  copy_envrc = true,       -- Copy .envrc file to new worktrees (direnv)
   worktree_dir = ".worktrees", -- Directory name for aggregating worktrees
+  worktreeinclude_file = ".worktreeinclude", -- File listing extra paths to copy
 })
 ```
 
@@ -153,10 +153,25 @@ require('git_worktree').setup({
 - **`cleanup_buffers = true`**: Closes buffers that don't exist in the new worktree
 - **Smart handling**: Preserves unsaved changes and shows warnings
 
-**Direnv Integration:**
-- **`copy_envrc = true`**: Automatically copies `.envrc` file from current worktree to new worktrees
-- **Smart copying**: Won't overwrite existing `.envrc` files in target worktree
-- **Seamless workflow**: Environment variables follow you to new worktrees
+**Including Extra Paths (`.worktreeinclude`):**
+
+Place a `.worktreeinclude` file at the repo root to copy additional, gitignored, or environment-specific files into every newly created worktree (including ones created by `:GitWorktreeReview`). One path per line, relative to the repository root. Lines starting with `#` and blank lines are ignored. Both files and directories are supported. Existing files in the target worktree are never overwritten.
+
+```
+# direnv / local env
+.envrc
+.envrc.local
+.env.development
+
+# Editor / tooling state
+.vscode
+.idea/runConfigurations
+
+# Local scripts
+scripts/dev-secrets.sh
+```
+
+Absolute paths and parent-traversal entries (`../...`) are rejected to keep copies confined to the worktree. The setting key `worktreeinclude_file` lets you change the filename.
 
 **Worktree Organization:**
 - **`worktree_dir = ".worktrees"`**: Configures the directory name where all worktrees are aggregated
@@ -287,7 +302,6 @@ Force cleanup completed:
 - Neovim 0.7+
 - Git
 - telescope.nvim (for UI)
-- direnv (optional, for `.envrc` file support)
 - GitHub CLI (`gh`) (optional, for PR review feature)
 
 ## Development

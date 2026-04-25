@@ -5,8 +5,8 @@ M.config = {
   cleanup_buffers = true,  -- Clean up buffers when switching worktrees
   warn_unsaved = true,     -- Warn about unsaved changes
   update_buffers = true,   -- Update buffer paths to match new worktree
-  copy_envrc = true,       -- Copy .envrc file to new worktrees (for direnv)
   worktree_dir = ".worktrees", -- Directory name for aggregating worktrees
+  worktreeinclude_file = ".worktreeinclude", -- File listing paths to copy to new worktrees
 }
 
 local function execute_command(cmd)
@@ -173,37 +173,111 @@ local function create_branch_from_current(branch)
   return true, nil
 end
 
-local function copy_envrc_file(source_dir, target_dir)
-  -- Skip if disabled
-  if not M.config.copy_envrc then
+local function shell_quote(path)
+  -- Wrap a path in single quotes for shell, escaping any embedded single quotes
+  return "'" .. path:gsub("'", [['\'']]) .. "'"
+end
+
+local function ensure_parent_dir(target_path)
+  local parent = target_path:match("^(.*)/[^/]+$")
+  if not parent or parent == "" then
     return true, nil
   end
-  
-  local source_envrc = source_dir .. "/.envrc"
-  local target_envrc = target_dir .. "/.envrc"
-  
-  -- Check if source .envrc exists
-  local source_stat = vim.loop.fs_stat(source_envrc)
-  if not source_stat then
-    -- No .envrc file to copy, that's ok
+  if vim.loop.fs_stat(parent) then
     return true, nil
   end
-  
-  -- Check if target .envrc already exists
-  local target_stat = vim.loop.fs_stat(target_envrc)
-  if target_stat then
-    -- Target .envrc already exists, don't overwrite
-    print("Note: .envrc already exists in target worktree, skipping copy")
+  -- mkdir -p semantics
+  local mkdir_cmd = "mkdir -p " .. shell_quote(parent)
+  local _, err = execute_command(mkdir_cmd)
+  if err then
+    return false, "Failed to create parent directory '" .. parent .. "': " .. err
+  end
+  return true, nil
+end
+
+local function copy_path(source, target)
+  -- Use cp -R to copy file or directory recursively
+  local cmd = "cp -R " .. shell_quote(source) .. " " .. shell_quote(target)
+  local _, err = execute_command(cmd)
+  if err then
+    return false, err
+  end
+  return true, nil
+end
+
+local function copy_worktree_includes(source_dir, target_dir)
+  local include_filename = M.config.worktreeinclude_file
+  if not include_filename or include_filename == "" then
     return true, nil
   end
-  
-  -- Copy the .envrc file
-  local success, err_name, err_msg = vim.loop.fs_copyfile(source_envrc, target_envrc)
-  if not success then
-    return false, "Failed to copy .envrc: " .. (err_msg or err_name or "Unknown error")
+
+  local include_path = source_dir .. "/" .. include_filename
+
+  -- Skip silently if .worktreeinclude doesn't exist
+  if not vim.loop.fs_stat(include_path) then
+    return true, nil
   end
-  
-  print("Copied .envrc to new worktree")
+
+  local fd, open_err = vim.loop.fs_open(include_path, "r", 438) -- 438 = 0666
+  if not fd then
+    return false, "Failed to open " .. include_filename .. ": " .. (open_err or "unknown error")
+  end
+
+  local stat = vim.loop.fs_fstat(fd)
+  local content = stat and vim.loop.fs_read(fd, stat.size, 0) or ""
+  vim.loop.fs_close(fd)
+
+  local copied = 0
+  local skipped = 0
+  local errors = {}
+
+  for raw_line in (content .. "\n"):gmatch("([^\r\n]*)\r?\n") do
+    -- Trim leading and trailing whitespace
+    local line = raw_line:gsub("^%s+", ""):gsub("%s+$", "")
+
+    -- Skip empty lines and comments
+    if line ~= "" and not line:match("^#") then
+      -- Reject absolute paths and parent traversal for safety
+      if line:sub(1, 1) == "/" or line:match("%.%.") then
+        table.insert(errors, "Ignored unsafe path in " .. include_filename .. ": " .. line)
+      else
+        local source_path = source_dir .. "/" .. line
+        local target_path = target_dir .. "/" .. line
+
+        local source_stat = vim.loop.fs_stat(source_path)
+        if not source_stat then
+          table.insert(errors, "Source path not found, skipping: " .. line)
+        elseif vim.loop.fs_stat(target_path) then
+          skipped = skipped + 1
+        else
+          local parent_ok, parent_err = ensure_parent_dir(target_path)
+          if not parent_ok then
+            table.insert(errors, parent_err)
+          else
+            local ok, copy_err = copy_path(source_path, target_path)
+            if ok then
+              copied = copied + 1
+            else
+              table.insert(errors, "Failed to copy '" .. line .. "': " .. copy_err)
+            end
+          end
+        end
+      end
+    end
+  end
+
+  if copied > 0 then
+    print(string.format("Copied %d entr%s from %s to new worktree",
+      copied, copied == 1 and "y" or "ies", include_filename))
+  end
+  if skipped > 0 then
+    print(string.format("Note: %d entr%s already existed in target worktree, skipped",
+      skipped, skipped == 1 and "y" or "ies"))
+  end
+  for _, msg in ipairs(errors) do
+    print("Warning: " .. msg)
+  end
+
   return true, nil
 end
 
@@ -439,12 +513,11 @@ function M.create_worktree(branch, opts)
     return false, "Failed to create worktree: " .. cmd_err
   end
 
-  -- Copy .envrc file from current directory to new worktree
+  -- Copy paths listed in .worktreeinclude (if present)
   local current_dir = vim.fn.getcwd()
-  local copy_success, copy_err = copy_envrc_file(current_dir, worktree_path)
-  if not copy_success then
-    -- Don't fail the entire operation if .envrc copy fails, just warn
-    print("Warning: " .. copy_err)
+  local include_success, include_err = copy_worktree_includes(current_dir, worktree_path)
+  if not include_success then
+    print("Warning: " .. include_err)
   end
 
   -- Switch to the newly created worktree
@@ -658,13 +731,13 @@ function M.review_pr(pr_number, opts)
     return false, "Failed to create worktree: " .. cmd_err
   end
   
-  -- Copy .envrc file
+  -- Copy paths listed in .worktreeinclude (if present)
   local current_dir = vim.fn.getcwd()
-  local copy_success, copy_err = copy_envrc_file(current_dir, worktree_path)
-  if not copy_success then
-    print("Warning: " .. copy_err)
+  local include_success, include_err = copy_worktree_includes(current_dir, worktree_path)
+  if not include_success then
+    print("Warning: " .. include_err)
   end
-  
+
   -- Switch to the review worktree
   update_buffers(worktree_path)
   vim.cmd("cd " .. worktree_path)

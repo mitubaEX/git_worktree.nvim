@@ -16,7 +16,6 @@ describe("git_worktree", function()
       cleanup_buffers = true,
       warn_unsaved = true,
       update_buffers = true,
-      copy_envrc = true,
       worktree_dir = ".worktrees",
     })
   end)
@@ -194,6 +193,99 @@ describe("git_worktree", function()
       local success, err = git_worktree.delete_worktree("non/existent")
       assert.is_false(success)
       assert.is_not_nil(err)
+    end)
+  end)
+
+  describe("worktreeinclude", function()
+    local test_branch = "test/include"
+    local include_path
+    local extra_file_path
+    local extra_dir_path
+    local nested_file_path
+
+    before_each(function()
+      include_path = original_cwd .. "/.worktreeinclude"
+      extra_file_path = original_cwd .. "/.worktree-extra"
+      extra_dir_path = original_cwd .. "/.worktree-extras"
+      nested_file_path = extra_dir_path .. "/nested.txt"
+
+      -- Clean up any leftover state from a prior aborted run
+      local worktree_path = original_cwd .. "/.worktrees/test_include"
+      vim.fn.system("git worktree remove --force " .. worktree_path)
+      vim.fn.system("git branch -D " .. test_branch)
+
+      -- Create source artifacts to be copied via .worktreeinclude
+      vim.fn.writefile({ "extra-file" }, extra_file_path)
+      vim.fn.mkdir(extra_dir_path, "p")
+      vim.fn.writefile({ "nested" }, nested_file_path)
+    end)
+
+    after_each(function()
+      vim.cmd("cd " .. original_cwd)
+      -- Worktrees populated by .worktreeinclude contain untracked files,
+      -- so `git worktree remove` would refuse them. Force-remove instead.
+      local worktree_path = original_cwd .. "/.worktrees/test_include"
+      vim.fn.system("git worktree remove --force " .. worktree_path)
+      vim.fn.system("git branch -D " .. test_branch)
+      os.remove(include_path)
+      os.remove(extra_file_path)
+      os.remove(nested_file_path)
+      pcall(vim.fn.delete, extra_dir_path, "rf")
+    end)
+
+    it("copies files and directories listed in .worktreeinclude", function()
+      vim.fn.writefile({
+        "# comment line",
+        "",
+        ".worktree-extra",
+        ".worktree-extras",
+      }, include_path)
+
+      local success, err = git_worktree.create_worktree(test_branch, {})
+      assert.is_true(success, err)
+
+      local worktree_path = vim.fn.getcwd()
+      assert.is_not_nil(vim.loop.fs_stat(worktree_path .. "/.worktree-extra"))
+      assert.is_not_nil(vim.loop.fs_stat(worktree_path .. "/.worktree-extras"))
+      assert.is_not_nil(vim.loop.fs_stat(worktree_path .. "/.worktree-extras/nested.txt"))
+    end)
+
+    it("skips entries whose source does not exist", function()
+      vim.fn.writefile({
+        ".worktree-extra",
+        "definitely-not-there.txt",
+      }, include_path)
+
+      local success, err = git_worktree.create_worktree(test_branch, {})
+      assert.is_true(success, err)
+
+      local worktree_path = vim.fn.getcwd()
+      assert.is_not_nil(vim.loop.fs_stat(worktree_path .. "/.worktree-extra"))
+      assert.is_nil(vim.loop.fs_stat(worktree_path .. "/definitely-not-there.txt"))
+    end)
+
+    it("does nothing when .worktreeinclude is absent", function()
+      -- include_path is not created here
+      local success, err = git_worktree.create_worktree(test_branch, {})
+      assert.is_true(success, err)
+
+      local worktree_path = vim.fn.getcwd()
+      assert.is_nil(vim.loop.fs_stat(worktree_path .. "/.worktree-extra"))
+    end)
+
+    it("ignores absolute and parent-traversal paths", function()
+      vim.fn.writefile({
+        "/etc/hosts",
+        "../escape.txt",
+        ".worktree-extra",
+      }, include_path)
+
+      local success, err = git_worktree.create_worktree(test_branch, {})
+      assert.is_true(success, err)
+
+      local worktree_path = vim.fn.getcwd()
+      assert.is_not_nil(vim.loop.fs_stat(worktree_path .. "/.worktree-extra"))
+      assert.is_nil(vim.loop.fs_stat(worktree_path .. "/etc/hosts"))
     end)
   end)
 
