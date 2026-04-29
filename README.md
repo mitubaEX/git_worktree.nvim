@@ -174,9 +174,17 @@ scripts/dev-secrets.sh
 Absolute paths and parent-traversal entries (`../...`) are rejected to keep copies confined to the worktree. The setting key `worktreeinclude_file` lets you change the filename.
 
 **Worktree Organization:**
-- **`worktree_dir = ".worktrees"`**: Configures the directory name where all worktrees are aggregated
-- **Centralized location**: All worktrees are organized in one place within your repository
-- **Customizable**: Change the directory name to suit your preferences (e.g., `_worktrees`, `.wt`, etc.)
+- **`worktree_dir = ".worktrees"`**: Configures where all worktrees are aggregated.
+- **Relative path** (default): Resolved against the repository root, so each repo keeps its own `.worktrees/<branch>` directory.
+- **Absolute path** (`/...` or `~/...`): Used as a shared base directory. Worktrees are namespaced by repo name to avoid collisions across repositories: `<absolute-base>/<repo-name>/<branch>`.
+
+```lua
+-- Per-repo (default): <repo>/.worktrees/<branch>
+require('git_worktree').setup({ worktree_dir = ".worktrees" })
+
+-- Shared across repos: ~/.git_worktrees/<repo>/<branch>
+require('git_worktree').setup({ worktree_dir = "~/.git_worktrees" })
+```
 
 **Example:** If you have `A/init.lua` open and switch worktrees, the buffer automatically updates to point to the same file in the new worktree location.
 

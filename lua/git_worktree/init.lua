@@ -72,15 +72,38 @@ local function validate_branch_name(branch)
   return true, nil
 end
 
+local function is_absolute_path(path)
+  -- Treat both POSIX absolute paths ("/...") and "~"-prefixed paths as absolute
+  -- since the user's intent in both cases is "outside the repo".
+  return path:sub(1, 1) == "/" or path:sub(1, 1) == "~"
+end
+
+local function resolve_worktree_base(git_root)
+  local config_dir = M.config.worktree_dir or ".worktrees"
+
+  if is_absolute_path(config_dir) then
+    -- Absolute base: namespace by repo name so a single shared directory
+    -- (e.g. "~/.git_worktrees") can hold worktrees from many repos without
+    -- branch-name collisions.
+    local expanded = vim.fn.expand(config_dir)
+    local repo_name = git_root:match("([^/]+)/?$") or "repo"
+    return expanded .. "/" .. repo_name
+  end
+
+  return git_root .. "/" .. config_dir
+end
+
 local function ensure_worktree_directory(git_root)
-  local worktree_dir = git_root .. "/" .. M.config.worktree_dir
+  local worktree_dir = resolve_worktree_base(git_root)
   local stat = vim.loop.fs_stat(worktree_dir)
 
   if not stat then
-    -- Create the worktree aggregate directory
-    local success, err_name, err_msg = vim.loop.fs_mkdir(worktree_dir, 511)  -- 511 in decimal = 777 in octal
-    if not success then
-      return nil, "Failed to create worktree directory: " .. (err_msg or err_name or "Unknown error")
+    -- Use mkdir -p semantics: an absolute base may need several intermediate
+    -- directories (e.g. "~/.git_worktrees/<repo>"), and the relative case
+    -- previously only created a single level.
+    local ok = pcall(vim.fn.mkdir, worktree_dir, "p")
+    if not ok or not vim.loop.fs_stat(worktree_dir) then
+      return nil, "Failed to create worktree directory: " .. worktree_dir
     end
   end
 

@@ -289,6 +289,108 @@ describe("git_worktree", function()
     end)
   end)
 
+  describe("worktree_dir with absolute path", function()
+    local test_branch = "test/abs-path"
+    -- Resolve /tmp through fs_realpath because macOS symlinks /tmp -> /private/tmp,
+    -- and getcwd() returns the realpath form after `cd`.
+    local tmp_real = vim.loop.fs_realpath("/tmp") or "/tmp"
+    local abs_base = tmp_real .. "/git_worktree_abs_test_" .. tostring(vim.fn.getpid())
+    local created_path
+
+    before_each(function()
+      created_path = nil
+      vim.fn.delete(abs_base, "rf")
+      git_worktree.setup({
+        cleanup_buffers = true,
+        warn_unsaved = true,
+        update_buffers = true,
+        worktree_dir = abs_base,
+      })
+    end)
+
+    after_each(function()
+      vim.cmd("cd " .. original_cwd)
+      if created_path then
+        vim.fn.system("git worktree remove --force " .. created_path)
+      end
+      vim.fn.system("git branch -D " .. test_branch)
+      vim.fn.delete(abs_base, "rf")
+      git_worktree.setup({
+        cleanup_buffers = true,
+        warn_unsaved = true,
+        update_buffers = true,
+        worktree_dir = ".worktrees",
+      })
+    end)
+
+    it("creates worktree under absolute base, namespaced by repo", function()
+      local success, err = git_worktree.create_worktree(test_branch, {})
+      assert.is_true(success, err)
+
+      created_path = vim.fn.getcwd()
+      assert.is_truthy(
+        created_path:find("^" .. vim.pesc(abs_base) .. "/"),
+        "worktree path " .. created_path .. " should be under " .. abs_base
+      )
+      -- Branch slashes become underscores in the directory leaf
+      assert.is_truthy(
+        created_path:match("/test_abs%-path$"),
+        "worktree leaf should be slashified branch name, got: " .. created_path
+      )
+      -- One namespace level should exist between abs_base and the branch leaf
+      local relative = created_path:sub(#abs_base + 2)
+      assert.is_truthy(
+        relative:match("^[^/]+/test_abs%-path$"),
+        "expected <repo>/<branch> layout, got: " .. relative
+      )
+    end)
+  end)
+
+  describe("worktree_dir with ~ expansion", function()
+    local test_branch = "test/abs-tilde"
+    local pid = tostring(vim.fn.getpid())
+    local rel_home = ".git_worktree_test_tilde_" .. pid
+    local home_dir = vim.fn.expand("~/" .. rel_home)
+    local created_path
+
+    before_each(function()
+      created_path = nil
+      vim.fn.delete(home_dir, "rf")
+      git_worktree.setup({
+        cleanup_buffers = true,
+        warn_unsaved = true,
+        update_buffers = true,
+        worktree_dir = "~/" .. rel_home,
+      })
+    end)
+
+    after_each(function()
+      vim.cmd("cd " .. original_cwd)
+      if created_path then
+        vim.fn.system("git worktree remove --force " .. created_path)
+      end
+      vim.fn.system("git branch -D " .. test_branch)
+      vim.fn.delete(home_dir, "rf")
+      git_worktree.setup({
+        cleanup_buffers = true,
+        warn_unsaved = true,
+        update_buffers = true,
+        worktree_dir = ".worktrees",
+      })
+    end)
+
+    it("expands ~ in worktree_dir", function()
+      local success, err = git_worktree.create_worktree(test_branch, {})
+      assert.is_true(success, err)
+
+      created_path = vim.fn.getcwd()
+      assert.is_truthy(
+        created_path:find("^" .. vim.pesc(home_dir) .. "/"),
+        "worktree path " .. created_path .. " should be under " .. home_dir
+      )
+    end)
+  end)
+
   describe("command execution", function()
     local test_branch = "test/commands"
 
