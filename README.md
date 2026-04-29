@@ -215,6 +215,8 @@ The plugin automatically detects the default branch by:
 2. Querying `git remote show origin` for the HEAD branch
 3. Falling back to common defaults (`main`, `master`)
 
+When `origin/<default>` exists, the plugin runs `git fetch origin <default>` before creating the worktree and bases the new branch on the freshly-fetched `origin/<default>` (with `--no-track`, so the new feature branch does not start tracking the default branch). This guarantees the worktree starts from the latest upstream tip even when the local default branch hasn't been pulled. If the fetch fails (offline, no origin), the plugin falls back to the local default branch and prints a warning.
+
 ## GitHub PR Review
 
 The `:GitWorktreeReview` command streamlines code review by automatically:

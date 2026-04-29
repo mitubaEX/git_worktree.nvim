@@ -499,21 +499,47 @@ function M.create_worktree(branch, opts)
   else
     -- Branch doesn't exist, determine base branch
     local base_branch
+    local no_track = false
     if opts.from_default_branch then
-      -- Create from default branch
+      -- Prefer the freshly-fetched origin tip so the new worktree starts from
+      -- the up-to-date upstream rather than a stale local copy of the default
+      -- branch.
       local default_branch, default_err = get_default_branch()
       if default_err then
         return false, default_err
       end
-      base_branch = default_branch
-      print("Creating new branch '" .. branch .. "' and worktree from default branch '" .. base_branch .. "'...")
+
+      local _, origin_ref_err = execute_command(
+        "git show-ref --verify --quiet refs/remotes/origin/" .. default_branch)
+      local has_origin_ref = origin_ref_err == nil
+
+      if has_origin_ref then
+        print("Fetching latest origin/" .. default_branch .. "...")
+        local _, fetch_err = execute_command(
+          "git fetch --quiet origin " .. default_branch)
+        if fetch_err then
+          print("Warning: fetch failed, falling back to local '"
+            .. default_branch .. "': " .. fetch_err)
+          base_branch = default_branch
+        else
+          base_branch = "origin/" .. default_branch
+          no_track = true
+        end
+      else
+        base_branch = default_branch
+      end
+
+      print("Creating new branch '" .. branch
+        .. "' and worktree from default branch '" .. base_branch .. "'...")
     else
       -- Create from current HEAD (default behavior)
       print("Creating new branch '" .. branch .. "' and worktree from current HEAD...")
     end
 
     if base_branch then
-      worktree_cmd = "git worktree add " .. quoted_path .. " -b " .. branch .. " " .. base_branch
+      local track_flag = no_track and " --no-track" or ""
+      worktree_cmd = "git worktree add " .. quoted_path
+        .. " -b " .. branch .. track_flag .. " " .. base_branch
     else
       worktree_cmd = "git worktree add " .. quoted_path .. " -b " .. branch
     end
