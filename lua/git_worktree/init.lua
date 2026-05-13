@@ -292,6 +292,38 @@ local function copy_worktree_includes(source_dir, target_dir)
   return true, nil
 end
 
+-- Parse a GitHub-like remote URL into (owner, repo). The host is intentionally
+-- not pinned to "github.com" so SSH config host aliases (e.g.
+-- "git@github-personal:owner/repo", see ~/.ssh/config) and GitHub Enterprise
+-- hosts both work. The actual API call is delegated to `gh`, which resolves
+-- aliases and honors `GH_HOST` itself.
+local function parse_github_remote_url(url)
+  if not url or url == "" then
+    return nil, nil
+  end
+
+  -- Strip a trailing ".git" so repo names that themselves contain dots
+  -- (e.g. "git_worktree.nvim") survive parsing intact.
+  url = url:gsub("%.git%s*$", ""):gsub("%s+$", "")
+
+  -- scp-like SSH form: [user@]host:owner/repo  (host may be an ssh_config alias)
+  local owner, repo = url:match("^[^@/:]+@[^:/]+:([^/]+)/(.+)$")
+  if owner and repo then
+    return owner, repo
+  end
+
+  -- ssh:// or https:// form: scheme://[user@]host[:port]/owner/repo
+  owner, repo = url:match("^%w[%w+%-.]*://[^/]+/([^/]+)/(.+)$")
+  if owner and repo then
+    return owner, repo
+  end
+
+  return nil, nil
+end
+
+-- Exposed for tests; not part of the public API.
+M._parse_github_remote_url = parse_github_remote_url
+
 local function get_github_remote_info()
   -- Get the remote URL for origin
   local result, err = execute_command("git remote get-url origin")
@@ -299,16 +331,7 @@ local function get_github_remote_info()
     return nil, nil, "No origin remote found"
   end
 
-  -- Strip an optional trailing ".git" so repo names that themselves contain
-  -- dots (e.g. "git_worktree.nvim") survive parsing intact.
-  local url = result:gsub("%.git%s*$", ""):gsub("%s+$", "")
-
-  -- SSH (git@github.com:owner/repo) or HTTPS (https://github.com/owner/repo).
-  local owner, repo = url:match("git@github%.com:([^/]+)/(.+)$")
-  if not owner then
-    owner, repo = url:match("https?://github%.com/([^/]+)/(.+)$")
-  end
-
+  local owner, repo = parse_github_remote_url(result)
   if not owner or not repo then
     return nil, nil, "Could not parse GitHub repository from remote URL"
   end
