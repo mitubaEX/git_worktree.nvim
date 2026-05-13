@@ -444,4 +444,63 @@ describe("git_worktree", function()
       assert.equals("echo 'second'", executed_commands[2])
     end)
   end)
+
+  describe("parse_github_remote_url", function()
+    local parse = git_worktree._parse_github_remote_url
+
+    it("parses SSH form on github.com", function()
+      local owner, repo = parse("git@github.com:owner/repo.git")
+      assert.equals("owner", owner)
+      assert.equals("repo", repo)
+    end)
+
+    it("parses SSH form with a host alias (issue #14)", function()
+      -- e.g. ~/.ssh/config: Host github-personal -> HostName github.com
+      local owner, repo = parse("git@github-personal:owner/repo.git")
+      assert.equals("owner", owner)
+      assert.equals("repo", repo)
+    end)
+
+    it("parses HTTPS form on github.com", function()
+      local owner, repo = parse("https://github.com/owner/repo.git")
+      assert.equals("owner", owner)
+      assert.equals("repo", repo)
+    end)
+
+    it("parses HTTPS form on a custom host (GHE)", function()
+      local owner, repo = parse("https://github.example.com/owner/repo.git")
+      assert.equals("owner", owner)
+      assert.equals("repo", repo)
+    end)
+
+    it("parses ssh:// scheme form", function()
+      local owner, repo = parse("ssh://git@github.com/owner/repo.git")
+      assert.equals("owner", owner)
+      assert.equals("repo", repo)
+    end)
+
+    it("preserves dots inside the repository name", function()
+      local owner, repo = parse("git@github.com:mitubaEX/git_worktree.nvim.git")
+      assert.equals("mitubaEX", owner)
+      assert.equals("git_worktree.nvim", repo)
+    end)
+
+    it("tolerates URLs without a trailing .git", function()
+      local owner, repo = parse("git@github-work:acme/widget")
+      assert.equals("acme", owner)
+      assert.equals("widget", repo)
+    end)
+
+    it("returns nil for unrecognized URLs", function()
+      local owner, repo = parse("not a url")
+      assert.is_nil(owner)
+      assert.is_nil(repo)
+    end)
+
+    it("returns nil for empty input", function()
+      local owner, repo = parse("")
+      assert.is_nil(owner)
+      assert.is_nil(repo)
+    end)
+  end)
 end)
