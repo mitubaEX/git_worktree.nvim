@@ -27,6 +27,43 @@ describe("git_worktree", function()
       assert.equals(true, git_worktree.config.cleanup_buffers)
       assert.equals(".worktrees", git_worktree.config.worktree_dir)
     end)
+
+    it("defaults gh_cmd to 'gh'", function()
+      assert.equals("gh", git_worktree.config.gh_cmd)
+    end)
+  end)
+
+  describe("build_pr_view_command", function()
+    -- Restore the default gh command so later tests are unaffected.
+    after_each(function()
+      git_worktree.setup({ gh_cmd = "gh" })
+    end)
+
+    it("builds the PR view command using the configured gh_cmd", function()
+      local cases = {
+        {
+          name = "default gh",
+          gh_cmd = "gh",
+          expected = "gh pr view 16 --repo owner/repo --json headRefName,headRepository",
+        },
+        {
+          name = "wrapper binary",
+          gh_cmd = "my-gh-wrapper",
+          expected = "my-gh-wrapper pr view 16 --repo owner/repo --json headRefName,headRepository",
+        },
+        {
+          name = "command with extra flags",
+          gh_cmd = "gh --foo",
+          expected = "gh --foo pr view 16 --repo owner/repo --json headRefName,headRepository",
+        },
+      }
+
+      for _, case in ipairs(cases) do
+        git_worktree.setup({ gh_cmd = case.gh_cmd })
+        local cmd = git_worktree.build_pr_view_command(16, "owner", "repo")
+        assert.equals(case.expected, cmd, case.name)
+      end
+    end)
   end)
 
   describe("current_worktree", function()

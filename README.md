@@ -145,6 +145,7 @@ require('git_worktree').setup({
   update_buffers = true,   -- Update buffer paths to match new worktree
   copy_envrc = true,       -- Copy .envrc file to new worktrees (direnv)
   worktree_dir = ".worktrees", -- Directory name for aggregating worktrees
+  gh_cmd = "gh",           -- Command used to invoke the GitHub CLI (PR review)
 })
 ```
 
@@ -162,6 +163,11 @@ require('git_worktree').setup({
 - **`worktree_dir = ".worktrees"`**: Configures the directory name where all worktrees are aggregated
 - **Centralized location**: All worktrees are organized in one place within your repository
 - **Customizable**: Change the directory name to suit your preferences (e.g., `_worktrees`, `.wt`, etc.)
+
+**GitHub CLI Command:**
+- **`gh_cmd = "gh"`**: The command used to invoke the GitHub CLI when fetching PR info for `:GitWorktreeReview`
+- **Wrapper support**: Point it at your own wrapper (e.g. `gh_cmd = "my-gh-wrapper"`) or add flags (e.g. `gh_cmd = "gh --foo"`) when plain `gh` does not work in your environment
+- The command is invoked as `<gh_cmd> pr view <pr_number> --repo <owner>/<repo> --json ...`
 
 **Example:** If you have `A/init.lua` open and switch worktrees, the buffer automatically updates to point to the same file in the new worktree location.
 
@@ -216,6 +222,8 @@ The `:GitWorktreeReview` command streamlines code review by automatically:
 **Requirements for PR review:**
 - GitHub CLI (`gh`) installed and authenticated
 - Repository must have GitHub origin remote
+
+> **Using a `gh` wrapper?** If you wrap or alias `gh` (for custom auth, etc.), set `gh_cmd` in `setup()` so the plugin invokes your command instead of the bare `gh` binary.
 
 ## Bulk Cleanup
 
