@@ -5,9 +5,9 @@ M.config = {
   cleanup_buffers = true,  -- Clean up buffers when switching worktrees
   warn_unsaved = true,     -- Warn about unsaved changes
   update_buffers = true,   -- Update buffer paths to match new worktree
-  copy_envrc = true,       -- Copy .envrc file to new worktrees (for direnv)
   worktree_dir = ".worktrees", -- Directory name for aggregating worktrees
   gh_cmd = "gh",           -- Command used to invoke the GitHub CLI; override to use a `gh` wrapper
+  worktreeinclude_file = ".worktreeinclude", -- File listing paths to copy to new worktrees
 }
 
 local function execute_command(cmd)
@@ -51,23 +51,60 @@ local function validate_branch_name(branch)
   if not branch or branch == "" then
     return false, "Branch name cannot be empty"
   end
-  
+
+  -- Conservative character allow-list: shell-safe and covers common branch names.
   if branch:match("[^%w%-%._/]") then
     return false, "Branch name contains invalid characters"
   end
-  
+
+  -- Reject leading "-" up front so it isn't mis-parsed as an option flag by
+  -- git below.
+  if branch:sub(1, 1) == "-" then
+    return false, "Branch name cannot start with '-'"
+  end
+
+  -- Defer to Git for the finer-grained rules (e.g. "..", trailing ".lock",
+  -- "@{", consecutive slashes, etc.).
+  local _, err = execute_command("git check-ref-format --branch " .. branch)
+  if err then
+    return false, "Invalid branch name: " .. branch
+  end
+
   return true, nil
 end
 
+local function is_absolute_path(path)
+  -- Treat both POSIX absolute paths ("/...") and "~"-prefixed paths as absolute
+  -- since the user's intent in both cases is "outside the repo".
+  return path:sub(1, 1) == "/" or path:sub(1, 1) == "~"
+end
+
+local function resolve_worktree_base(git_root)
+  local config_dir = M.config.worktree_dir or ".worktrees"
+
+  if is_absolute_path(config_dir) then
+    -- Absolute base: namespace by repo name so a single shared directory
+    -- (e.g. "~/.git_worktrees") can hold worktrees from many repos without
+    -- branch-name collisions.
+    local expanded = vim.fn.expand(config_dir)
+    local repo_name = git_root:match("([^/]+)/?$") or "repo"
+    return expanded .. "/" .. repo_name
+  end
+
+  return git_root .. "/" .. config_dir
+end
+
 local function ensure_worktree_directory(git_root)
-  local worktree_dir = git_root .. "/" .. M.config.worktree_dir
+  local worktree_dir = resolve_worktree_base(git_root)
   local stat = vim.loop.fs_stat(worktree_dir)
 
   if not stat then
-    -- Create the worktree aggregate directory
-    local success, err_name, err_msg = vim.loop.fs_mkdir(worktree_dir, 511)  -- 511 in decimal = 777 in octal
-    if not success then
-      return nil, "Failed to create worktree directory: " .. (err_msg or err_name or "Unknown error")
+    -- Use mkdir -p semantics: an absolute base may need several intermediate
+    -- directories (e.g. "~/.git_worktrees/<repo>"), and the relative case
+    -- previously only created a single level.
+    local ok = pcall(vim.fn.mkdir, worktree_dir, "p")
+    if not ok or not vim.loop.fs_stat(worktree_dir) then
+      return nil, "Failed to create worktree directory: " .. worktree_dir
     end
   end
 
@@ -137,8 +174,8 @@ local function get_default_branch()
   -- Fallback to common default branch names
   local common_defaults = {"main", "master"}
   for _, branch in ipairs(common_defaults) do
-    local exists = execute_command("git show-ref --verify --quiet refs/heads/" .. branch)
-    if exists then
+    local _, ref_err = execute_command("git show-ref --verify --quiet refs/heads/" .. branch)
+    if not ref_err then
       return branch, nil
     end
   end
@@ -165,48 +202,151 @@ local function branch_exists(branch)
   return false, nil, nil
 end
 
-local function create_branch_from_current(branch)
-  -- Create a new branch from current HEAD
-  local result, err = execute_command("git branch " .. branch)
+local function shell_quote(path)
+  -- Wrap a path in single quotes for shell, escaping any embedded single quotes
+  return "'" .. path:gsub("'", [['\'']]) .. "'"
+end
+
+local function ensure_parent_dir(target_path)
+  local parent = target_path:match("^(.*)/[^/]+$")
+  if not parent or parent == "" then
+    return true, nil
+  end
+  if vim.loop.fs_stat(parent) then
+    return true, nil
+  end
+  -- mkdir -p semantics
+  local mkdir_cmd = "mkdir -p " .. shell_quote(parent)
+  local _, err = execute_command(mkdir_cmd)
   if err then
-    return false, "Failed to create branch: " .. err
+    return false, "Failed to create parent directory '" .. parent .. "': " .. err
   end
   return true, nil
 end
 
-local function copy_envrc_file(source_dir, target_dir)
-  -- Skip if disabled
-  if not M.config.copy_envrc then
-    return true, nil
+local function copy_path(source, target)
+  -- Use cp -R to copy file or directory recursively
+  local cmd = "cp -R " .. shell_quote(source) .. " " .. shell_quote(target)
+  local _, err = execute_command(cmd)
+  if err then
+    return false, err
   end
-  
-  local source_envrc = source_dir .. "/.envrc"
-  local target_envrc = target_dir .. "/.envrc"
-  
-  -- Check if source .envrc exists
-  local source_stat = vim.loop.fs_stat(source_envrc)
-  if not source_stat then
-    -- No .envrc file to copy, that's ok
-    return true, nil
-  end
-  
-  -- Check if target .envrc already exists
-  local target_stat = vim.loop.fs_stat(target_envrc)
-  if target_stat then
-    -- Target .envrc already exists, don't overwrite
-    print("Note: .envrc already exists in target worktree, skipping copy")
-    return true, nil
-  end
-  
-  -- Copy the .envrc file
-  local success, err_name, err_msg = vim.loop.fs_copyfile(source_envrc, target_envrc)
-  if not success then
-    return false, "Failed to copy .envrc: " .. (err_msg or err_name or "Unknown error")
-  end
-  
-  print("Copied .envrc to new worktree")
   return true, nil
 end
+
+local function copy_worktree_includes(source_dir, target_dir)
+  local include_filename = M.config.worktreeinclude_file
+  if not include_filename or include_filename == "" then
+    return true, nil
+  end
+
+  local include_path = source_dir .. "/" .. include_filename
+
+  -- Skip silently if .worktreeinclude doesn't exist
+  if not vim.loop.fs_stat(include_path) then
+    return true, nil
+  end
+
+  local fd, open_err = vim.loop.fs_open(include_path, "r", 438) -- 438 = 0666
+  if not fd then
+    return false, "Failed to open " .. include_filename .. ": " .. (open_err or "unknown error")
+  end
+
+  local stat = vim.loop.fs_fstat(fd)
+  local content = stat and vim.loop.fs_read(fd, stat.size, 0) or ""
+  vim.loop.fs_close(fd)
+
+  local copied = 0
+  local skipped = 0
+  local errors = {}
+
+  for raw_line in (content .. "\n"):gmatch("([^\r\n]*)\r?\n") do
+    -- Trim leading and trailing whitespace
+    local line = raw_line:gsub("^%s+", ""):gsub("%s+$", "")
+
+    -- Skip empty lines and comments
+    if line ~= "" and not line:match("^#") then
+      -- Reject absolute paths, parent traversal, and the .git directory itself
+      -- (copying .git would corrupt the new worktree).
+      if line:sub(1, 1) == "/"
+          or line:match("%.%.")
+          or line == ".git"
+          or line:match("^%.git/")
+          or line:match("/%.git$")
+          or line:match("/%.git/") then
+        table.insert(errors, "Ignored unsafe path in " .. include_filename .. ": " .. line)
+      else
+        local source_path = source_dir .. "/" .. line
+        local target_path = target_dir .. "/" .. line
+
+        local source_stat = vim.loop.fs_stat(source_path)
+        if not source_stat then
+          table.insert(errors, "Source path not found, skipping: " .. line)
+        elseif vim.loop.fs_stat(target_path) then
+          skipped = skipped + 1
+        else
+          local parent_ok, parent_err = ensure_parent_dir(target_path)
+          if not parent_ok then
+            table.insert(errors, parent_err)
+          else
+            local ok, copy_err = copy_path(source_path, target_path)
+            if ok then
+              copied = copied + 1
+            else
+              table.insert(errors, "Failed to copy '" .. line .. "': " .. copy_err)
+            end
+          end
+        end
+      end
+    end
+  end
+
+  if copied > 0 then
+    print(string.format("Copied %d entr%s from %s to new worktree",
+      copied, copied == 1 and "y" or "ies", include_filename))
+  end
+  if skipped > 0 then
+    print(string.format("Note: %d entr%s already existed in target worktree, skipped",
+      skipped, skipped == 1 and "y" or "ies"))
+  end
+  for _, msg in ipairs(errors) do
+    print("Warning: " .. msg)
+  end
+
+  return true, nil
+end
+
+-- Parse a GitHub-like remote URL into (owner, repo). The host is intentionally
+-- not pinned to "github.com" so SSH config host aliases (e.g.
+-- "git@github-personal:owner/repo", see ~/.ssh/config) and GitHub Enterprise
+-- hosts both work. The actual API call is delegated to `gh`, which resolves
+-- aliases and honors `GH_HOST` itself.
+local function parse_github_remote_url(url)
+  if not url or url == "" then
+    return nil, nil
+  end
+
+  -- Strip a trailing ".git" so repo names that themselves contain dots
+  -- (e.g. "git_worktree.nvim") survive parsing intact.
+  url = url:gsub("%.git%s*$", ""):gsub("%s+$", "")
+
+  -- scp-like SSH form: [user@]host:owner/repo  (host may be an ssh_config alias)
+  local owner, repo = url:match("^[^@/:]+@[^:/]+:([^/]+)/(.+)$")
+  if owner and repo then
+    return owner, repo
+  end
+
+  -- ssh:// or https:// form: scheme://[user@]host[:port]/owner/repo
+  owner, repo = url:match("^%w[%w+%-.]*://[^/]+/([^/]+)/(.+)$")
+  if owner and repo then
+    return owner, repo
+  end
+
+  return nil, nil
+end
+
+-- Exposed for tests; not part of the public API.
+M._parse_github_remote_url = parse_github_remote_url
 
 local function get_github_remote_info()
   -- Get the remote URL for origin
@@ -214,23 +354,12 @@ local function get_github_remote_info()
   if err then
     return nil, nil, "No origin remote found"
   end
-  
-  -- Parse GitHub URL to extract owner and repo
-  -- Handle both SSH and HTTPS formats
-  local owner, repo
-  
-  -- SSH format: git@github.com:owner/repo.git
-  owner, repo = result:match("git@github%.com:([^/]+)/([^%.]+)")
-  
-  if not owner then
-    -- HTTPS format: https://github.com/owner/repo.git
-    owner, repo = result:match("https://github%.com/([^/]+)/([^%.]+)")
-  end
-  
+
+  local owner, repo = parse_github_remote_url(result)
   if not owner or not repo then
     return nil, nil, "Could not parse GitHub repository from remote URL"
   end
-  
+
   return owner, repo, nil
 end
 
@@ -410,39 +539,68 @@ function M.create_worktree(branch, opts)
 
   -- Check if branch exists
   local exists, branch_type, remote_name = branch_exists(branch)
+  local quoted_path = shell_quote(worktree_path)
   local worktree_cmd
 
   if exists then
     if branch_type == "local" then
       -- Branch exists locally, create worktree from it
-      worktree_cmd = "git worktree add " .. worktree_path .. " " .. branch
+      worktree_cmd = "git worktree add " .. quoted_path .. " " .. branch
       print("Creating worktree from existing local branch '" .. branch .. "'...")
     elseif branch_type == "remote" then
       -- Branch exists on remote, create worktree and track remote branch
       local remote = remote_name or "origin"
-      worktree_cmd = "git worktree add " .. worktree_path .. " -b " .. branch .. " " .. remote .. "/" .. branch
+      worktree_cmd = "git worktree add " .. quoted_path .. " -b " .. branch .. " " .. remote .. "/" .. branch
       print("Creating worktree from remote branch '" .. remote .. "/" .. branch .. "'...")
+    else
+      return false, "Unexpected branch existence state for '" .. branch .. "'"
     end
   else
     -- Branch doesn't exist, determine base branch
     local base_branch
+    local no_track = false
     if opts.from_default_branch then
-      -- Create from default branch
+      -- Prefer the freshly-fetched origin tip so the new worktree starts from
+      -- the up-to-date upstream rather than a stale local copy of the default
+      -- branch.
       local default_branch, default_err = get_default_branch()
       if default_err then
         return false, default_err
       end
-      base_branch = default_branch
-      print("Creating new branch '" .. branch .. "' and worktree from default branch '" .. base_branch .. "'...")
+
+      local _, origin_ref_err = execute_command(
+        "git show-ref --verify --quiet refs/remotes/origin/" .. default_branch)
+      local has_origin_ref = origin_ref_err == nil
+
+      if has_origin_ref then
+        print("Fetching latest origin/" .. default_branch .. "...")
+        local _, fetch_err = execute_command(
+          "git fetch --quiet origin " .. default_branch)
+        if fetch_err then
+          print("Warning: fetch failed, falling back to local '"
+            .. default_branch .. "': " .. fetch_err)
+          base_branch = default_branch
+        else
+          base_branch = "origin/" .. default_branch
+          no_track = true
+        end
+      else
+        base_branch = default_branch
+      end
+
+      print("Creating new branch '" .. branch
+        .. "' and worktree from default branch '" .. base_branch .. "'...")
     else
       -- Create from current HEAD (default behavior)
       print("Creating new branch '" .. branch .. "' and worktree from current HEAD...")
     end
 
     if base_branch then
-      worktree_cmd = "git worktree add " .. worktree_path .. " -b " .. branch .. " " .. base_branch
+      local track_flag = no_track and " --no-track" or ""
+      worktree_cmd = "git worktree add " .. quoted_path
+        .. " -b " .. branch .. track_flag .. " " .. base_branch
     else
-      worktree_cmd = "git worktree add " .. worktree_path .. " -b " .. branch
+      worktree_cmd = "git worktree add " .. quoted_path .. " -b " .. branch
     end
   end
 
@@ -452,17 +610,19 @@ function M.create_worktree(branch, opts)
     return false, "Failed to create worktree: " .. cmd_err
   end
 
-  -- Copy .envrc file from current directory to new worktree
-  local current_dir = vim.fn.getcwd()
-  local copy_success, copy_err = copy_envrc_file(current_dir, worktree_path)
-  if not copy_success then
-    -- Don't fail the entire operation if .envrc copy fails, just warn
-    print("Warning: " .. copy_err)
+  -- Copy paths listed in .worktreeinclude (if present). The include file lives
+  -- at the repo root, not necessarily the current working directory.
+  local git_root_for_include = get_git_root()
+  if git_root_for_include then
+    local include_success, include_err = copy_worktree_includes(git_root_for_include, worktree_path)
+    if not include_success then
+      print("Warning: " .. include_err)
+    end
   end
 
   -- Switch to the newly created worktree
   update_buffers(worktree_path)
-  vim.cmd("cd " .. worktree_path)
+  vim.api.nvim_set_current_dir(worktree_path)
 
   print("Created worktree for branch '" .. branch .. "' at: " .. worktree_path)
 
@@ -496,7 +656,7 @@ function M.switch_worktree(branch, opts)
     update_buffers(worktree_path)
 
     -- Found the branch in worktree list, switch to it
-    vim.cmd("cd " .. worktree_path)
+    vim.api.nvim_set_current_dir(worktree_path)
     print("Switched to worktree: " .. worktree_path .. " [" .. branch .. "]")
 
     -- Execute post-switch command if provided
@@ -523,7 +683,7 @@ function M.switch_worktree(branch, opts)
       -- Update/cleanup buffers from old worktree before switching
       update_buffers(expected_path)
 
-      vim.cmd("cd " .. expected_path)
+      vim.api.nvim_set_current_dir(expected_path)
       print("Switched to worktree: " .. expected_path)
 
       -- Execute post-switch command if provided
@@ -555,11 +715,11 @@ function M.delete_worktree(branch)
     return false, err
   end
   
-  local result, cmd_err = execute_command("git worktree remove " .. worktree_path)
+  local result, cmd_err = execute_command("git worktree remove " .. shell_quote(worktree_path))
   if cmd_err then
     return false, "Failed to delete worktree: " .. cmd_err
   end
-  
+
   print("Deleted worktree for branch: " .. branch)
   return true, nil
 end
@@ -625,6 +785,7 @@ function M.review_pr(pr_number, opts)
 
   -- Fetch the PR branch
   local fetch_cmd
+  local remote_ref
   if pr_info.is_fork then
     -- For forks, we need to fetch from the fork's remote
     print("Fetching from fork: " .. pr_info.fork_owner .. "/" .. pr_info.repo_name)
@@ -637,9 +798,11 @@ function M.review_pr(pr_number, opts)
 
     -- Fetch the fork's branch
     fetch_cmd = string.format("git fetch %s %s", remote_name, pr_info.branch)
+    remote_ref = remote_name .. "/" .. pr_info.branch
   else
     -- For same-repo PRs, fetch from origin
     fetch_cmd = string.format("git fetch origin %s", pr_info.branch)
+    remote_ref = "origin/" .. pr_info.branch
   end
 
   print("Fetching PR branch...")
@@ -649,20 +812,35 @@ function M.review_pr(pr_number, opts)
   end
 
   -- Create worktree from the fetched branch
+  local quoted_path = shell_quote(worktree_path)
   local worktree_cmd
   if branch_exists_locally then
-    -- Branch already exists locally, use it directly
-    print("Using existing local branch '" .. review_branch .. "'...")
-    worktree_cmd = string.format("git worktree add %s %s", worktree_path, review_branch)
+    -- A local branch with the PR's name already exists. Fast-forward it to the
+    -- freshly fetched commit so the reviewer sees the latest PR state, not a
+    -- stale checkout from a previous review. Abort if the local branch has
+    -- diverged (commits not on the remote ref) to avoid silently dropping work.
+    local ahead, ahead_err = execute_command(string.format(
+      "git rev-list --count %s..%s", remote_ref, review_branch))
+    if ahead_err then
+      return false, "Failed to compare local branch with remote: " .. ahead_err
+    end
+    if tonumber(ahead) and tonumber(ahead) > 0 then
+      return false, string.format(
+        "Local branch '%s' has %s commit(s) not on %s. Refusing to overwrite; "
+        .. "rename, push, or delete the local branch and retry.",
+        review_branch, ahead, remote_ref)
+    end
+    print("Updating existing local branch '" .. review_branch .. "' to " .. remote_ref .. "...")
+    local _, update_err = execute_command(string.format(
+      "git branch --force %s %s", review_branch, remote_ref))
+    if update_err then
+      return false, "Failed to update local branch '" .. review_branch .. "': " .. update_err
+    end
+    worktree_cmd = string.format("git worktree add %s %s", quoted_path, review_branch)
   else
     -- Branch doesn't exist locally, create it from remote
-    if pr_info.is_fork then
-      worktree_cmd = string.format("git worktree add %s -b %s %s/%s",
-                                  worktree_path, review_branch, pr_info.fork_owner, pr_info.branch)
-    else
-      worktree_cmd = string.format("git worktree add %s -b %s origin/%s",
-                                  worktree_path, review_branch, pr_info.branch)
-    end
+    worktree_cmd = string.format("git worktree add %s -b %s %s",
+                                quoted_path, review_branch, remote_ref)
   end
 
   print("Creating worktree for PR branch...")
@@ -670,17 +848,21 @@ function M.review_pr(pr_number, opts)
   if cmd_err then
     return false, "Failed to create worktree: " .. cmd_err
   end
-  
-  -- Copy .envrc file
-  local current_dir = vim.fn.getcwd()
-  local copy_success, copy_err = copy_envrc_file(current_dir, worktree_path)
-  if not copy_success then
-    print("Warning: " .. copy_err)
+
+  -- Copy paths listed in .worktreeinclude (if present). Source from the repo
+  -- root rather than cwd so the file is found regardless of where the command
+  -- is invoked.
+  local git_root_for_include = get_git_root()
+  if git_root_for_include then
+    local include_success, include_err = copy_worktree_includes(git_root_for_include, worktree_path)
+    if not include_success then
+      print("Warning: " .. include_err)
+    end
   end
-  
+
   -- Switch to the review worktree
   update_buffers(worktree_path)
-  vim.cmd("cd " .. worktree_path)
+  vim.api.nvim_set_current_dir(worktree_path)
 
   print("Created worktree for PR #" .. pr_num .. " at: " .. worktree_path)
   print("Branch: " .. pr_info.branch)
@@ -761,7 +943,7 @@ function M.cleanup_all_worktrees()
   local failed_worktrees = {}
   
   for _, wt in ipairs(worktrees) do
-    local cmd = "git worktree remove " .. wt.path
+    local cmd = "git worktree remove " .. shell_quote(wt.path)
     local result, cmd_err = execute_command(cmd)
     
     if cmd_err then
@@ -825,17 +1007,17 @@ function M.force_cleanup_all_worktrees()
   local failed_worktrees = {}
 
   for _, wt in ipairs(worktrees) do
+    local quoted_wt = shell_quote(wt.path)
+
     -- First, discard all changes in the worktree
     -- Reset staged and unstaged changes
-    local reset_cmd = "git -C " .. wt.path .. " reset --hard HEAD"
-    execute_command(reset_cmd)
+    execute_command("git -C " .. quoted_wt .. " reset --hard HEAD")
 
     -- Remove untracked files and directories
-    local clean_cmd = "git -C " .. wt.path .. " clean -fd"
-    execute_command(clean_cmd)
+    execute_command("git -C " .. quoted_wt .. " clean -fd")
 
     -- Now force remove the worktree
-    local cmd = "git worktree remove --force " .. wt.path
+    local cmd = "git worktree remove --force " .. quoted_wt
     local result, cmd_err = execute_command(cmd)
 
     if cmd_err then

@@ -14,8 +14,8 @@ A Neovim plugin for managing Git worktrees with Telescope integration.
       cleanup_buffers = true,  -- Clean up old buffers when switching
       warn_unsaved = true,     -- Warn about unsaved changes
       update_buffers = true,   -- Update buffer paths to new worktree
-      copy_envrc = true,       -- Copy .envrc file to new worktrees (direnv)
       worktree_dir = ".worktrees", -- Directory for aggregating worktrees
+      worktreeinclude_file = ".worktreeinclude", -- File listing extra paths to copy
     })
     require('telescope').load_extension('git_worktree')
   end
@@ -143,9 +143,9 @@ require('git_worktree').setup({
   cleanup_buffers = true,  -- Clean up old buffers when switching
   warn_unsaved = true,     -- Warn about unsaved changes in buffers
   update_buffers = true,   -- Update buffer paths to match new worktree
-  copy_envrc = true,       -- Copy .envrc file to new worktrees (direnv)
   worktree_dir = ".worktrees", -- Directory name for aggregating worktrees
   gh_cmd = "gh",           -- Command used to invoke the GitHub CLI (PR review)
+  worktreeinclude_file = ".worktreeinclude", -- File listing extra paths to copy
 })
 ```
 
@@ -154,15 +154,38 @@ require('git_worktree').setup({
 - **`cleanup_buffers = true`**: Closes buffers that don't exist in the new worktree
 - **Smart handling**: Preserves unsaved changes and shows warnings
 
-**Direnv Integration:**
-- **`copy_envrc = true`**: Automatically copies `.envrc` file from current worktree to new worktrees
-- **Smart copying**: Won't overwrite existing `.envrc` files in target worktree
-- **Seamless workflow**: Environment variables follow you to new worktrees
+**Including Extra Paths (`.worktreeinclude`):**
+
+Place a `.worktreeinclude` file at the repo root to copy additional, gitignored, or environment-specific files into every newly created worktree (including ones created by `:GitWorktreeReview`). One path per line, relative to the repository root. Lines starting with `#` and blank lines are ignored. Both files and directories are supported. Existing files in the target worktree are never overwritten.
+
+```
+# direnv / local env
+.envrc
+.envrc.local
+.env.development
+
+# Editor / tooling state
+.vscode
+.idea/runConfigurations
+
+# Local scripts
+scripts/dev-secrets.sh
+```
+
+Absolute paths and parent-traversal entries (`../...`) are rejected to keep copies confined to the worktree. The setting key `worktreeinclude_file` lets you change the filename.
 
 **Worktree Organization:**
-- **`worktree_dir = ".worktrees"`**: Configures the directory name where all worktrees are aggregated
-- **Centralized location**: All worktrees are organized in one place within your repository
-- **Customizable**: Change the directory name to suit your preferences (e.g., `_worktrees`, `.wt`, etc.)
+- **`worktree_dir = ".worktrees"`**: Configures where all worktrees are aggregated.
+- **Relative path** (default): Resolved against the repository root, so each repo keeps its own `.worktrees/<branch>` directory.
+- **Absolute path** (`/...` or `~/...`): Used as a shared base directory. Worktrees are namespaced by repo name to avoid collisions across repositories: `<absolute-base>/<repo-name>/<branch>`.
+
+```lua
+-- Per-repo (default): <repo>/.worktrees/<branch>
+require('git_worktree').setup({ worktree_dir = ".worktrees" })
+
+-- Shared across repos: ~/.git_worktrees/<repo>/<branch>
+require('git_worktree').setup({ worktree_dir = "~/.git_worktrees" })
+```
 
 **GitHub CLI Command:**
 - **`gh_cmd = "gh"`**: The command used to invoke the GitHub CLI when fetching PR info for `:GitWorktreeReview`
@@ -205,6 +228,8 @@ The plugin automatically detects the default branch by:
 1. Checking `git symbolic-ref refs/remotes/origin/HEAD`
 2. Querying `git remote show origin` for the HEAD branch
 3. Falling back to common defaults (`main`, `master`)
+
+When `origin/<default>` exists, the plugin runs `git fetch origin <default>` before creating the worktree and bases the new branch on the freshly-fetched `origin/<default>` (with `--no-track`, so the new feature branch does not start tracking the default branch). This guarantees the worktree starts from the latest upstream tip even when the local default branch hasn't been pulled. If the fetch fails (offline, no origin), the plugin falls back to the local default branch and prints a warning.
 
 ## GitHub PR Review
 
@@ -295,7 +320,6 @@ Force cleanup completed:
 - Neovim 0.7+
 - Git
 - telescope.nvim (for UI)
-- direnv (optional, for `.envrc` file support)
 - GitHub CLI (`gh`) (optional, for PR review feature)
 
 ## Development
