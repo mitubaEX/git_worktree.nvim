@@ -6,6 +6,7 @@ M.config = {
   warn_unsaved = true,     -- Warn about unsaved changes
   update_buffers = true,   -- Update buffer paths to match new worktree
   worktree_dir = ".worktrees", -- Directory name for aggregating worktrees
+  gh_cmd = "gh",           -- Command used to invoke the GitHub CLI; override to use a `gh` wrapper
   worktreeinclude_file = ".worktreeinclude", -- File listing paths to copy to new worktrees
 }
 
@@ -362,16 +363,28 @@ local function get_github_remote_info()
   return owner, repo, nil
 end
 
+-- Build the GitHub CLI command used to fetch PR information.
+-- Exposed (and reads M.config.gh_cmd) so users can swap in a `gh` wrapper.
+function M.build_pr_view_command(pr_number, owner, repo)
+  return string.format(
+    "%s pr view %s --repo %s/%s --json headRefName,headRepository",
+    M.config.gh_cmd,
+    pr_number,
+    owner,
+    repo
+  )
+end
+
 local function fetch_pr_info(pr_number)
   -- Get GitHub repository info
   local owner, repo, err = get_github_remote_info()
   if err then
     return nil, err
   end
-  
+
   -- Use GitHub CLI to get PR information
-  local gh_cmd = string.format("gh pr view %s --repo %s/%s --json headRefName,headRepository", pr_number, owner, repo)
-  local result, cmd_err = execute_command(gh_cmd)
+  local pr_view_cmd = M.build_pr_view_command(pr_number, owner, repo)
+  local result, cmd_err = execute_command(pr_view_cmd)
   if cmd_err then
     return nil, "Failed to fetch PR info. Make sure 'gh' CLI is installed and authenticated: " .. cmd_err
   end
