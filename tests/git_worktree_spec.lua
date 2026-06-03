@@ -65,6 +65,42 @@ describe("git_worktree", function()
     end)
   end)
 
+  describe("resolve_review_base_ref", function()
+    it("uses the tracking ref when present, else falls back to FETCH_HEAD", function()
+      local cases = {
+        {
+          name = "origin tracking ref exists",
+          remote_ref = "origin/feature/x",
+          tracking_ref_exists = true,
+          expected = "origin/feature/x",
+        },
+        {
+          name = "origin tracking ref missing -> FETCH_HEAD",
+          remote_ref = "origin/feature/x",
+          tracking_ref_exists = false,
+          expected = "FETCH_HEAD",
+        },
+        {
+          name = "fork tracking ref exists",
+          remote_ref = "someuser/feature/x",
+          tracking_ref_exists = true,
+          expected = "someuser/feature/x",
+        },
+        {
+          name = "fork tracking ref missing -> FETCH_HEAD",
+          remote_ref = "someuser/feature/x",
+          tracking_ref_exists = false,
+          expected = "FETCH_HEAD",
+        },
+      }
+
+      for _, case in ipairs(cases) do
+        local ref = git_worktree.resolve_review_base_ref(case.remote_ref, case.tracking_ref_exists)
+        assert.equals(case.expected, ref, case.name)
+      end
+    end)
+  end)
+
   describe("current_worktree", function()
     it("returns current worktree info", function()
       local success, err = git_worktree.current_worktree()

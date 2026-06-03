@@ -375,6 +375,19 @@ function M.build_pr_view_command(pr_number, owner, repo)
   )
 end
 
+-- Pick the git ref to build a PR-review branch from after fetching.
+-- Prefer the remote-tracking ref (so the review branch tracks the remote), but
+-- fall back to FETCH_HEAD when that ref is absent. `git fetch <remote> <branch>`
+-- always writes FETCH_HEAD, while the tracking ref's creation depends on the
+-- remote's fetch refspec (single-branch clones, restricted refspecs, or
+-- directory/file ref conflicts can leave it missing). Exposed for testability.
+function M.resolve_review_base_ref(remote_ref, tracking_ref_exists)
+  if tracking_ref_exists then
+    return remote_ref
+  end
+  return "FETCH_HEAD"
+end
+
 local function fetch_pr_info(pr_number)
   -- Get GitHub repository info
   local owner, repo, err = get_github_remote_info()
@@ -811,6 +824,14 @@ function M.review_pr(pr_number, opts)
     return false, "Failed to fetch PR branch: " .. fetch_err
   end
 
+  -- The fetch above guarantees FETCH_HEAD but not the remote-tracking ref
+  -- (origin/<branch>); when it's missing, using it below would fail with
+  -- "exit code 128". Resolve the ref to build from: tracking ref if it exists,
+  -- else FETCH_HEAD (exactly what we just fetched).
+  local _, ref_err = execute_command(
+    "git show-ref --verify --quiet refs/remotes/" .. remote_ref)
+  local base_ref = M.resolve_review_base_ref(remote_ref, ref_err == nil)
+
   -- Create worktree from the fetched branch
   local quoted_path = shell_quote(worktree_path)
   local worktree_cmd
@@ -820,7 +841,7 @@ function M.review_pr(pr_number, opts)
     -- stale checkout from a previous review. Abort if the local branch has
     -- diverged (commits not on the remote ref) to avoid silently dropping work.
     local ahead, ahead_err = execute_command(string.format(
-      "git rev-list --count %s..%s", remote_ref, review_branch))
+      "git rev-list --count %s..%s", base_ref, review_branch))
     if ahead_err then
       return false, "Failed to compare local branch with remote: " .. ahead_err
     end
@@ -832,7 +853,7 @@ function M.review_pr(pr_number, opts)
     end
     print("Updating existing local branch '" .. review_branch .. "' to " .. remote_ref .. "...")
     local _, update_err = execute_command(string.format(
-      "git branch --force %s %s", review_branch, remote_ref))
+      "git branch --force %s %s", review_branch, base_ref))
     if update_err then
       return false, "Failed to update local branch '" .. review_branch .. "': " .. update_err
     end
@@ -840,7 +861,7 @@ function M.review_pr(pr_number, opts)
   else
     -- Branch doesn't exist locally, create it from remote
     worktree_cmd = string.format("git worktree add %s -b %s %s",
-                                quoted_path, review_branch, remote_ref)
+                                quoted_path, review_branch, base_ref)
   end
 
   print("Creating worktree for PR branch...")
