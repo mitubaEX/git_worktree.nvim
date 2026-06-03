@@ -793,8 +793,11 @@ function M.review_pr(pr_number, opts)
     return false, path_err
   end
   
-  -- Check if the branch already exists locally
-  local branch_exists_locally, _, _ = branch_exists(review_branch)
+  -- Check if the branch already exists locally. `branch_exists()` also reports
+  -- remote-tracking branches, but only a real local branch should go through
+  -- the fast-forward safety check/update path below.
+  local branch_exists_anywhere, branch_type, _ = branch_exists(review_branch)
+  local branch_exists_locally = branch_exists_anywhere and branch_type == "local"
 
   -- Fetch the PR branch
   local fetch_cmd

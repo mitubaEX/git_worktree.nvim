@@ -1,5 +1,24 @@
 local git_worktree = require("git_worktree")
 
+local function shell_quote(value)
+  return "'" .. value:gsub("'", [['\'']]) .. "'"
+end
+
+local function run_git(git_bin, cwd, args)
+  local cmd = { git_bin }
+  if cwd then
+    table.insert(cmd, "-C")
+    table.insert(cmd, cwd)
+  end
+  for _, arg in ipairs(args) do
+    table.insert(cmd, arg)
+  end
+
+  local out = vim.fn.system(cmd)
+  assert.equals(0, vim.v.shell_error, table.concat(cmd, " ") .. "\n" .. out)
+  return out
+end
+
 describe("git_worktree", function()
   local original_cwd
 
@@ -359,6 +378,98 @@ describe("git_worktree", function()
       local worktree_path = vim.fn.getcwd()
       assert.is_not_nil(vim.loop.fs_stat(worktree_path .. "/.worktree-extra"))
       assert.is_nil(vim.loop.fs_stat(worktree_path .. "/etc/hosts"))
+    end)
+  end)
+
+  describe("review_pr", function()
+    local tmp_dir
+    local old_path
+
+    after_each(function()
+      vim.env.PATH = old_path
+      vim.cmd("cd " .. vim.fn.fnameescape(original_cwd))
+      if tmp_dir then
+        vim.fn.delete(tmp_dir, "rf")
+      end
+      git_worktree.setup({
+        cleanup_buffers = true,
+        warn_unsaved = true,
+        update_buffers = true,
+        worktree_dir = ".worktrees",
+        gh_cmd = "gh",
+      })
+    end)
+
+    it("creates a local review branch when only the remote-tracking branch exists", function()
+      old_path = vim.env.PATH
+      tmp_dir = vim.fn.tempname()
+      assert.equals(1, vim.fn.mkdir(tmp_dir, "p"))
+
+      local real_git = vim.fn.exepath("git")
+      assert.is_truthy(real_git)
+
+      local remote_dir = tmp_dir .. "/origin.git"
+      local repo_dir = tmp_dir .. "/repo"
+      local branch = "kaionn/fix-approvable-number-filter-chip-duplicate-label"
+
+      run_git(real_git, nil, { "init", "--bare", remote_dir })
+      run_git(real_git, nil, { "init", repo_dir })
+      run_git(real_git, repo_dir, { "config", "commit.gpgsign", "false" })
+      run_git(real_git, repo_dir, { "config", "tag.gpgSign", "false" })
+      run_git(real_git, repo_dir, { "config", "user.name", "Test User" })
+      run_git(real_git, repo_dir, { "config", "user.email", "test@example.com" })
+
+      vim.fn.writefile({ "base" }, repo_dir .. "/README.md")
+      run_git(real_git, repo_dir, { "add", "README.md" })
+      run_git(real_git, repo_dir, { "commit", "-m", "base" })
+      run_git(real_git, repo_dir, { "branch", "-M", "main" })
+      run_git(real_git, repo_dir, { "remote", "add", "origin", remote_dir })
+      run_git(real_git, repo_dir, { "push", "-u", "origin", "main" })
+
+      run_git(real_git, repo_dir, { "checkout", "-b", branch })
+      vim.fn.writefile({ "base", "feature" }, repo_dir .. "/README.md")
+      run_git(real_git, repo_dir, { "commit", "-am", "feature" })
+      run_git(real_git, repo_dir, { "push", "origin", branch })
+      run_git(real_git, repo_dir, { "checkout", "main" })
+      run_git(real_git, repo_dir, { "branch", "-D", branch })
+      run_git(real_git, repo_dir, { "fetch", "origin", branch .. ":refs/remotes/origin/" .. branch })
+
+      local git_wrapper = tmp_dir .. "/git"
+      vim.fn.writefile({
+        "#!/bin/sh",
+        'if [ "$1" = "remote" ] && [ "$2" = "get-url" ] && [ "$3" = "origin" ]; then',
+        "  printf '%s\\n' 'https://github.com/owner/repo.git'",
+        "  exit 0",
+        "fi",
+        "exec " .. shell_quote(real_git) .. ' "$@"',
+      }, git_wrapper)
+      vim.fn.setfperm(git_wrapper, "rwx------")
+
+      local gh_mock = tmp_dir .. "/gh-mock"
+      local pr_json = '{"headRefName":"' .. branch .. '","headRepository":{"owner":{"login":"owner"}}}'
+      vim.fn.writefile({
+        "#!/bin/sh",
+        "printf '%s\\n' " .. shell_quote(pr_json),
+      }, gh_mock)
+      vim.fn.setfperm(gh_mock, "rwx------")
+
+      vim.env.PATH = tmp_dir .. ":" .. old_path
+      git_worktree.setup({
+        cleanup_buffers = true,
+        warn_unsaved = true,
+        update_buffers = true,
+        worktree_dir = ".worktrees",
+        gh_cmd = shell_quote(gh_mock),
+      })
+
+      vim.cmd("cd " .. vim.fn.fnameescape(repo_dir))
+      local success, err = git_worktree.review_pr("123")
+
+      assert.is_true(success, err)
+      assert.is_nil(err)
+      run_git(real_git, repo_dir, { "show-ref", "--verify", "--quiet", "refs/heads/" .. branch })
+      local repo_realpath = vim.loop.fs_realpath(repo_dir) or repo_dir
+      assert.equals(repo_realpath .. "/.worktrees/" .. branch:gsub("/", "_"), vim.fn.getcwd())
     end)
   end)
 
